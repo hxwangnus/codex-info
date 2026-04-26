@@ -42,7 +42,7 @@ npm start -- --group-by model --limit 10
 npm start -- --group-by project --include-project-paths
 npm start -- --cost --group-by model
 npm start -- 2026 --brief --cost
-npm start -- 2026 --brief --sync-git git@github.com:YOU/codex-info-sync.git --device xps13
+npm start -- 2026 --brief --sync-git git@github.com:hxwangnus/codex-info.git --sync-branch usage-sync --device xps13
 npm start -- --json
 npm start -- --html report/codex-usage.html
 ```
@@ -55,13 +55,12 @@ npx . --year 2026
 
 ## Merge Multiple Computers
 
-The easiest ongoing workflow is Git sync. Create one empty private repository, then run the same command on every machine with a different `--device` name:
+The easiest ongoing workflow is Git sync. This repo itself can be the private sync backend: keep source code on `main`, and store usage data on a separate `usage-sync` branch. Run the same command on every machine with a different `--device` name:
 
 ```bash
-npx . 2026 --brief --sync-git git@github.com:YOU/codex-info-sync.git --device xps13
-npx . 2026 --brief --cost --sync-git git@github.com:YOU/codex-info-sync.git --sync-branch usage-sync --device xps13
-npx . 2026 --brief --sync-git git@github.com:YOU/codex-info-sync.git --device macbook
-npx . 2026 --brief --sync-git git@github.com:YOU/codex-info-sync.git --device blade18
+npx . 2026 --brief --cost --sync-git git@github.com:hxwangnus/codex-info.git --sync-branch usage-sync --device xps13
+npx . 2026 --brief --cost --sync-git git@github.com:hxwangnus/codex-info.git --sync-branch usage-sync --device macbook16
+npx . 2026 --brief --cost --sync-git git@github.com:hxwangnus/codex-info.git --sync-branch usage-sync --device blade18
 ```
 
 Each run pulls the private repo, writes only that machine's device file, pushes it back, then reports the merged total across all devices. Running the same machine again updates existing session hashes instead of counting them twice.
