@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { collectUsage, defaultCodexHome } from "./usage.js";
 import { renderBriefReport, renderJson, renderTextReport, writeHtmlReport } from "./format.js";
+import { writeHeatmapPng } from "./heatmap-png.js";
 import { enrichWithOnlineMetadata } from "./metadata.js";
-import { syncGitUsage } from "./sync-git.js";
+import { syncGitUsage, updateSyncReadme } from "./sync-git.js";
 import { addDays, localDateKey, startOfLocalIsoWeek, startOfLocalToday } from "./date-utils.js";
 
 async function main() {
@@ -19,6 +20,13 @@ async function main() {
   if (options.onlineMetadata) {
     await enrichWithOnlineMetadata(result, options);
   }
+  if (options.syncGit && options.syncReadme) {
+    const readmeSync = await updateSyncReadme(result, options);
+    result.summary.sync = {
+      ...result.summary.sync,
+      readme: readmeSync
+    };
+  }
 
   if (options.json) {
     process.stdout.write(`${renderJson(result)}\n`);
@@ -32,6 +40,11 @@ async function main() {
     const output = await writeHtmlReport(result, options.html, options);
     process.stdout.write(`\nHTML report written to ${output}\n`);
   }
+
+  if (options.png) {
+    const output = await writeHeatmapPng(result, options.png, options);
+    process.stdout.write(`\nPNG heatmap written to ${output}\n`);
+  }
 }
 
 function parseArgs(argv) {
@@ -43,6 +56,7 @@ function parseArgs(argv) {
     topModels: 2,
     brief: false,
     heatmap: false,
+    png: "",
     includeProjectPaths: false,
     includeFiles: false,
     includeArchived: false,
@@ -52,6 +66,7 @@ function parseArgs(argv) {
     syncBranch: "main",
     syncCache: "",
     syncDevice: "",
+    syncReadme: true,
     syncProjects: false,
     color: true
   };
@@ -88,6 +103,9 @@ function parseArgs(argv) {
       options.topModels = positiveInt(requiredValue(argv, ++index, arg), arg);
     } else if (arg === "--html") {
       options.html = requiredValue(argv, ++index, arg);
+    } else if (arg === "--png") {
+      options.png = requiredValue(argv, ++index, arg);
+      options.heatmap = true;
     } else if (arg === "--json") {
       options.json = true;
     } else if (arg === "--brief" || arg === "--compact") {
@@ -106,6 +124,8 @@ function parseArgs(argv) {
       options.syncCache = requiredValue(argv, ++index, arg);
     } else if (arg === "--device") {
       options.syncDevice = requiredValue(argv, ++index, arg);
+    } else if (arg === "--no-sync-readme") {
+      options.syncReadme = false;
     } else if (arg === "--sync-projects") {
       options.syncProjects = true;
     } else if (arg === "--include-archived") {
@@ -168,12 +188,14 @@ Options:
   --heatmap, --calendar      Print a GitHub-style daily usage grid
   --json                     Print machine-readable JSON
   --html <file>              Write a self-contained local HTML report
+  --png <file>               Write a PNG heatmap
   --cost, --online-metadata  Fetch public model/pricing metadata and estimate cost
   --pricing-tier <tier>      standard, batch, flex, or priority (default: standard)
   --sync-git <repo-url>      Sync usage through your private Git repository
   --device <name>            Device name for --sync-git (default: hostname)
   --sync-branch <branch>     Git sync branch (default: main)
   --sync-cache <path>        Local sync clone cache (default: ~/.codex-info/sync/...)
+  --no-sync-readme           Do not update README/PNG in the private sync repo
   --sync-projects            Upload project basenames to the private sync repo
   --include-archived         Include archived_sessions/*.jsonl
   --include-project-paths    Show full project paths instead of basenames
@@ -187,8 +209,8 @@ Privacy:
   Makes no network requests unless --online-metadata/--cost or --sync-git is set.
   Cost uses OpenAI official pricing docs when available, falling back to a public pricing table.
   Online metadata requests use fixed public URLs and send no local usage data.
-  Git sync uploads hashed session ids, token counts, model, time, and device name.
-  Project names are not uploaded unless --sync-projects is set.
+  Git sync uploads hashed session ids, project basename hashes, token counts, model, time, device name, and a README/PNG report.
+  Project basenames are not uploaded unless --sync-projects is set.
 `;
 }
 

@@ -5,6 +5,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { addUsage, emptyUsage } from "./usage.js";
 import { dayKeyInRange, isoWeekKey, localDateKey, timestampInRange } from "./date-utils.js";
+import { renderHeatmapPng } from "./heatmap-png.js";
 
 const SYNC_SCHEMA_VERSION = 1;
 const DATA_DIR = "codex-info/devices";
@@ -58,6 +59,40 @@ export async function syncGitUsage(localResult, options = {}) {
   return merged;
 }
 
+export async function updateSyncReadme(result, options = {}) {
+  const repoUrl = options.syncGit;
+  if (!repoUrl) return { pushed: false, skipped: true };
+
+  const branch = options.syncBranch || "main";
+  const device = safeDeviceName(options.syncDevice || os.hostname() || "unknown-device");
+  const worktree = syncWorktree(repoUrl, options.syncCache);
+
+  ensureGitRepo(repoUrl, worktree, branch);
+
+  const pngRelativePath = "assets/codex-usage-heatmap.png";
+  const readmePath = path.join(worktree, "README.md");
+  const pngPath = path.join(worktree, pngRelativePath);
+
+  await fs.promises.mkdir(path.dirname(pngPath), { recursive: true });
+  await fs.promises.writeFile(pngPath, renderHeatmapPng(result, options));
+  await fs.promises.writeFile(readmePath, renderSyncReadme(result, options, pngRelativePath), "utf8");
+
+  const changed = hasGitChanges(worktree);
+  let pushed = false;
+  if (changed) {
+    git(worktree, ["add", readmePath, pngPath]);
+    git(worktree, ["commit", "-m", `Update Codex usage report for ${device}`], { commitEnv: true });
+    pushed = pushWithRetry(worktree, branch);
+  }
+
+  return {
+    pushed,
+    worktree,
+    readme: "README.md",
+    png: pngRelativePath
+  };
+}
+
 function ensureGitRepo(repoUrl, worktree, branch) {
   if (!fs.existsSync(path.join(worktree, ".git"))) {
     fs.mkdirSync(path.dirname(worktree), { recursive: true });
@@ -79,6 +114,122 @@ function ensureGitRepo(repoUrl, worktree, branch) {
   }
 }
 
+function renderSyncReadme(result, options, pngRelativePath) {
+  const summary = result.summary || {};
+  const usage = summary.usage || emptyUsage();
+  const titleRange = reportRangeLabel(result, options);
+  const generatedAt = new Date().toISOString();
+  const lines = [
+    "# Codex Usage Report",
+    "",
+    `Generated: ${generatedAt}`,
+    `Range: ${titleRange}`,
+    "",
+    `![Codex usage heatmap](${pngRelativePath})`,
+    "",
+    "## Summary",
+    "",
+    "| Metric | Value |",
+    "| --- | ---: |",
+    `| Sessions | ${formatNumber(summary.sessions)} |`,
+    `| User messages | ${formatNumber(summary.userMessages)} |`,
+    `| Active days | ${formatNumber(summary.activeDays)} |`,
+    `| Projects | ${formatNumber(summary.projects)} |`,
+    `| Devices | ${formatNumber(summary.devices || summary.sync?.devices || 1)} |`,
+    `| Total tokens | ${formatNumber(usage.totalTokens)} |`,
+    `| Input tokens | ${formatNumber(usage.inputTokens)} |`,
+    `| Cached input tokens | ${formatNumber(usage.cachedInputTokens)} |`,
+    `| Output tokens | ${formatNumber(usage.outputTokens)} |`,
+    `| Reasoning tokens | ${formatNumber(usage.reasoningOutputTokens)} |`
+  ];
+
+  if (typeof summary.estimatedCostUSD === "number") {
+    lines.push(`| Estimated cost | ${formatUsd(summary.estimatedCostUSD)} |`);
+  }
+
+  lines.push("", "## Top Models", "");
+  const models = (result.groups?.model || []).slice(0, 10);
+  if (models.length) {
+    const hasCost = models.some((row) => typeof row.estimatedCostUSD === "number");
+    lines.push(hasCost ? "| Model | Tokens | Cost |" : "| Model | Tokens |");
+    lines.push(hasCost ? "| --- | ---: | ---: |" : "| --- | ---: |");
+    for (const row of models) {
+      const model = escapeMarkdown(row.model || "unknown");
+      const tokens = formatNumber(row.usage?.totalTokens);
+      if (hasCost) {
+        lines.push(`| ${model} | ${tokens} | ${formatUsd(row.estimatedCostUSD)} |`);
+      } else {
+        lines.push(`| ${model} | ${tokens} |`);
+      }
+    }
+  } else {
+    lines.push("No model data.");
+  }
+
+  lines.push("", "## Device Sync", "");
+  const devices = summary.sync?.devicesLastSynced || [];
+  if (devices.length) {
+    lines.push("| Device | Last synced | Sessions |");
+    lines.push("| --- | --- | ---: |");
+    for (const row of devices) {
+      lines.push(`| ${escapeMarkdown(row.device)} | ${formatTimestamp(row.updatedAt)} | ${formatNumber(row.sessions)} |`);
+    }
+  } else {
+    lines.push("Local-only report.");
+  }
+
+  lines.push(
+    "",
+    "## Privacy",
+    "",
+    "This repo is intended to stay private. It stores aggregated Codex usage summaries, hashed session ids, project basename hashes, model names, token counts, timestamps, device names, and optional project basenames. It does not store prompts, assistant responses, OpenAI credentials, Codex auth files, or full project paths.",
+    ""
+  );
+
+  return `${lines.join("\n")}`;
+}
+
+function reportRangeLabel(result, options = {}) {
+  if (options.periodLabel) return options.periodLabel;
+  if (options.year) return String(options.year);
+  const range = result.summary?.dateRange;
+  const start = compactDate(range?.start);
+  const end = compactDate(range?.end);
+  if (start && end && start !== end) return `${start} to ${end}`;
+  if (start || end) return start || end;
+  return "All available data";
+}
+
+function formatNumber(value) {
+  return new Intl.NumberFormat("en-US").format(Number(value) || 0);
+}
+
+function formatUsd(value) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "";
+  return `$${new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: value >= 1 ? 2 : 4,
+    maximumFractionDigits: 4
+  }).format(value)}`;
+}
+
+function formatTimestamp(value) {
+  if (!value) return "never";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "unknown";
+  return date.toISOString().replace("T", " ").replace(/\.\d{3}Z$/, " UTC");
+}
+
+function compactDate(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString().slice(0, 10);
+}
+
+function escapeMarkdown(value) {
+  return String(value || "").replace(/[\\|]/g, "\\$&");
+}
+
 function pushWithRetry(worktree, branch) {
   const pushed = git(worktree, ["push", "-u", "origin", branch], { optional: true });
   if (pushed !== null) return true;
@@ -92,7 +243,7 @@ function pushWithRetry(worktree, branch) {
 }
 
 function sessionToRecord(session, device, options) {
-  const project = session.project && session.project !== "unknown" ? session.project : "";
+  const project = syncProjectName(session.project);
   return {
     id: hashValue(`session:${session.id}`),
     schemaVersion: SYNC_SCHEMA_VERSION,
@@ -109,6 +260,12 @@ function sessionToRecord(session, device, options) {
     usage: normalizeStoredUsage(session.usage),
     days: Array.isArray(session.days) ? session.days.map(normalizeDayRecord) : []
   };
+}
+
+function syncProjectName(project) {
+  const value = String(project || "");
+  if (!value || value === "unknown") return "";
+  return value.split(/[\\/]+/).filter(Boolean).pop() || "";
 }
 
 function mergeRecordsIntoDevice(deviceFile, records) {

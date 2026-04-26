@@ -9,7 +9,7 @@ Local-only Codex token usage reporter. It reads Codex session JSONL files from y
 - Does not read `auth.json`, `config.toml`, `history.jsonl`, or `logs`.
 - Makes no network requests by default.
 - With `--cost` or `--online-metadata`, fetches OpenAI official pricing metadata from a fixed docs URL without sending local usage, paths, prompts, or statistics. If official parsing fails, it falls back to a public pricing table.
-- With `--sync-git`, syncs token summaries through your private Git repository. It uploads hashed session ids, token counts, model, time, and device name; project names are omitted unless `--sync-projects` is set.
+- With `--sync-git`, syncs token summaries through your private Git repository and updates that repo's README/PNG dashboard. It uploads hashed session ids, project basename hashes, token counts, model, time, and device name; project basenames are omitted unless `--sync-projects` is set.
 - Has no runtime npm dependencies.
 - Does not print prompts or assistant responses.
 - Shows only project basenames by default; pass `--include-project-paths` if you want full paths.
@@ -65,6 +65,8 @@ npx . 2026 --brief --cost --sync-git git@github.com:YOUR_NAME/codex-info-sync.gi
 
 Each run pulls the private repo, writes only that machine's device file, pushes it back, then reports the merged total across all devices. Running the same machine again updates existing session hashes instead of counting them twice.
 Merged sync reports include a `Device sync` section showing each device's last successful sync time.
+Each sync run also updates the private repo's `README.md` and `assets/codex-usage-heatmap.png`, so the private GitHub repo homepage becomes a visual dashboard for the latest command's date range. Add `--no-sync-readme` if you only want to update the device JSON data.
+Sync always stores project hashes and optional project names from project basenames, even if your local terminal report uses `--include-project-paths`.
 
 Add `--cost` to estimate cost from the merged usage. By default this uses OpenAI's `standard` token prices; pass `--pricing-tier batch`, `--pricing-tier flex`, or `--pricing-tier priority` if that better matches how you used the API.
 
@@ -123,6 +125,14 @@ GitHub-style yearly token heatmap across synced devices:
 ```bash
 npx . 2026 --heatmap --top-sessions 0 --sync-git git@github.com:YOUR_NAME/codex-info-sync.git --device laptop
 ```
+
+PNG yearly token heatmap:
+
+```bash
+npx . 2026 --png report/codex-heatmap.png --top-sessions 0 --sync-git git@github.com:YOUR_NAME/codex-info-sync.git --device laptop
+```
+
+When `--sync-git` is present, the same PNG-style dashboard is also committed to the private sync repo README automatically. For a yearly dashboard in GitHub, run the yearly command above; for today's dashboard, run the `--today` command.
 
 Replace `YOUR_NAME/codex-info-sync` with your own private sync repo, and replace `--device laptop` with the current machine's device name. To inspect only the current machine without cloud sync, omit the `--sync-git` and `--device` flags.
 

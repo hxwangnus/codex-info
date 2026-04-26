@@ -5,9 +5,10 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { collectUsage, normalizeUsage, diffUsage } from "../src/usage.js";
-import { syncGitUsage } from "../src/sync-git.js";
+import { syncGitUsage, updateSyncReadme } from "../src/sync-git.js";
 import { parseOpenAiPricingMarkdown } from "../src/metadata.js";
 import { renderBriefReport } from "../src/format.js";
+import { renderHeatmapPng, writeHeatmapPng } from "../src/heatmap-png.js";
 
 test("normalizes usage field aliases", () => {
   assert.deepEqual(normalizeUsage({
@@ -102,9 +103,44 @@ test("syncs through a private Git-style remote without double counting reruns", 
   assert.deepEqual(mergedB.summary.sync.devicesLastSynced.map((item) => item.device), ["macbook", "xps13"]);
   assert.ok(mergedB.summary.sync.devicesLastSynced.every((item) => item.updatedAt));
 
+  const readmeSync = await updateSyncReadme(mergedB, { syncGit: remote, syncCache: path.join(cacheB, "repo"), syncDevice: "macbook", year: "2026" });
+  assert.equal(readmeSync.pushed, true);
+  const readme = await fs.promises.readFile(path.join(cacheB, "repo", "README.md"), "utf8");
+  assert.match(readme, /Codex Usage Report/);
+  assert.match(readme, /assets\/codex-usage-heatmap\.png/);
+  assert.match(readme, /xps13/);
+  const png = await fs.promises.readFile(path.join(cacheB, "repo", "assets", "codex-usage-heatmap.png"));
+  assert.deepEqual([...png.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+
   const rerunA = await syncGitUsage(localA, { syncGit: remote, syncCache: path.join(cacheA, "repo"), syncDevice: "xps13", year: "2026" });
   assert.equal(rerunA.summary.sessions, 2);
   assert.equal(rerunA.summary.usage.totalTokens, 30);
+});
+
+test("sync uploads only project basenames even when local output uses full paths", async () => {
+  if (!hasGit()) return;
+
+  const remote = await fs.promises.mkdtemp(path.join(os.tmpdir(), "codex-info-remote-"));
+  execFileSync("git", ["init", "--bare", remote], { stdio: "ignore" });
+
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "codex-info-full-path-"));
+  const cache = await fs.promises.mkdtemp(path.join(os.tmpdir(), "codex-info-cache-"));
+  await writeSession(root, "path-sync", "2026-04-26T01:00:00.000Z", "/private/home/user/secret-project", "gpt-a", 10);
+
+  const local = await collectUsage({ codexHomes: [root], year: "2026", includeProjectPaths: true });
+  assert.equal(local.sessions[0].project, "/private/home/user/secret-project");
+
+  await syncGitUsage(local, {
+    syncGit: remote,
+    syncCache: path.join(cache, "repo"),
+    syncDevice: "laptop",
+    syncProjects: true,
+    year: "2026"
+  });
+
+  const deviceFile = await fs.promises.readFile(path.join(cache, "repo", "codex-info", "devices", "laptop.json"), "utf8");
+  assert.match(deviceFile, /secret-project/);
+  assert.doesNotMatch(deviceFile, /\/private\/home\/user/);
 });
 
 test("parses OpenAI official pricing markdown rows", () => {
@@ -183,6 +219,29 @@ test("filters a local date range and keeps weekly groups", async () => {
   assert.equal(result.summary.usage.totalTokens, 10);
   assert.equal(result.groups.day[0].date, "2026-04-26");
   assert.equal(result.groups.week[0].week, "2026-W17");
+});
+
+test("renders a PNG heatmap", async () => {
+  const result = {
+    summary: {
+      usage: { totalTokens: 1234567 },
+      dateRange: { start: "2026-01-01T00:00:00.000Z", end: "2026-12-31T00:00:00.000Z" }
+    },
+    groups: {
+      day: [
+        { date: "2026-04-26", usage: { totalTokens: 100 } },
+        { date: "2026-04-27", usage: { totalTokens: 400 } }
+      ]
+    }
+  };
+  const buffer = renderHeatmapPng(result, { year: "2026" });
+  assert.deepEqual([...buffer.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+  assert.equal(buffer.subarray(12, 16).toString("ascii"), "IHDR");
+
+  const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "codex-info-png-"));
+  const file = await writeHeatmapPng(result, path.join(dir, "heatmap.png"), { year: "2026" });
+  const stat = await fs.promises.stat(file);
+  assert.ok(stat.size > 1000);
 });
 
 async function writeSession(root, id, timestamp, cwd, model, totalTokens) {
