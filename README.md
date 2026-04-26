@@ -42,7 +42,7 @@ npm start -- --group-by model --limit 10
 npm start -- --group-by project --include-project-paths
 npm start -- --cost --group-by model
 npm start -- 2026 --brief --cost
-npm start -- 2026 --brief --sync-git git@github.com:hxwangnus/codex-info.git --sync-branch usage-sync --device xps13
+npm start -- 2026 --brief --sync-git git@github.com:hxwangnus/codex-info-sync.git --device xps13
 npm start -- --json
 npm start -- --html report/codex-usage.html
 ```
@@ -55,12 +55,12 @@ npx . --year 2026
 
 ## Merge Multiple Computers
 
-The easiest ongoing workflow is Git sync. This repo itself can be the private sync backend: keep source code on `main`, and store usage data on a separate `usage-sync` branch. Run the same command on every machine with a different `--device` name:
+The easiest ongoing workflow is Git sync. Keep this source repo for the tool code, and use the separate private `hxwangnus/codex-info-sync` repo for usage data. Run the same command on every machine with a different `--device` name:
 
 ```bash
-npx . 2026 --brief --cost --sync-git git@github.com:hxwangnus/codex-info.git --sync-branch usage-sync --device xps13
-npx . 2026 --brief --cost --sync-git git@github.com:hxwangnus/codex-info.git --sync-branch usage-sync --device macbook16
-npx . 2026 --brief --cost --sync-git git@github.com:hxwangnus/codex-info.git --sync-branch usage-sync --device blade18
+npx . 2026 --brief --cost --sync-git git@github.com:hxwangnus/codex-info-sync.git --device xps13
+npx . 2026 --brief --cost --sync-git git@github.com:hxwangnus/codex-info-sync.git --device macbook16
+npx . 2026 --brief --cost --sync-git git@github.com:hxwangnus/codex-info-sync.git --device blade18
 ```
 
 Each run pulls the private repo, writes only that machine's device file, pushes it back, then reports the merged total across all devices. Running the same machine again updates existing session hashes instead of counting them twice.
@@ -92,39 +92,39 @@ npx . 2026 --brief --codex-home ~/.codex --codex-home imports/macbook --codex-ho
 
 ## Day, Week, and Calendar Views
 
-The commands below pull the private `usage-sync` branch first, so they report merged usage across all synced devices.
+The commands below pull the private sync repo first, so they report merged usage across all synced devices.
 
 Current day across synced devices:
 
 ```bash
-npx . --today --brief --cost --sync-git git@github.com:hxwangnus/codex-info.git --sync-branch usage-sync --device xps13
+npx . --today --brief --cost --sync-git git@github.com:hxwangnus/codex-info-sync.git --device xps13
 ```
 
 Current ISO week across synced devices, Monday through Sunday:
 
 ```bash
-npx . --this-week --brief --cost --sync-git git@github.com:hxwangnus/codex-info.git --sync-branch usage-sync --device xps13
+npx . --this-week --brief --cost --sync-git git@github.com:hxwangnus/codex-info-sync.git --device xps13
 ```
 
 Every day in a year across synced devices:
 
 ```bash
-npx . 2026 --group-by day --limit 366 --top-sessions 0 --sync-git git@github.com:hxwangnus/codex-info.git --sync-branch usage-sync --device xps13
+npx . 2026 --group-by day --limit 366 --top-sessions 0 --sync-git git@github.com:hxwangnus/codex-info-sync.git --device xps13
 ```
 
 Every week in a year across synced devices:
 
 ```bash
-npx . 2026 --group-by week --limit 60 --top-sessions 0 --sync-git git@github.com:hxwangnus/codex-info.git --sync-branch usage-sync --device xps13
+npx . 2026 --group-by week --limit 60 --top-sessions 0 --sync-git git@github.com:hxwangnus/codex-info-sync.git --device xps13
 ```
 
 GitHub-style yearly token heatmap across synced devices:
 
 ```bash
-npx . 2026 --heatmap --top-sessions 0 --sync-git git@github.com:hxwangnus/codex-info.git --sync-branch usage-sync --device xps13
+npx . 2026 --heatmap --top-sessions 0 --sync-git git@github.com:hxwangnus/codex-info-sync.git --device xps13
 ```
 
-Replace `--device xps13` with the current machine's device name when running from another computer. To inspect only the current machine without cloud sync, omit the `--sync-git`, `--sync-branch`, and `--device` flags.
+Replace `--device xps13` with the current machine's device name when running from another computer. To inspect only the current machine without cloud sync, omit the `--sync-git` and `--device` flags.
 
 ## Development
 
