@@ -16,6 +16,13 @@ Local-only Codex token usage reporter. It reads Codex session JSONL files from y
 
 Codex stores token counters in `event_msg` entries where `payload.type` is `token_count`. To avoid duplicate counts, the parser prefers deltas from `payload.info.total_token_usage` and only falls back to `payload.info.last_token_usage` if cumulative totals are absent.
 
+## Prerequisites
+
+- Node.js 18 or newer.
+- npm/npx available in your shell.
+
+This package has no runtime npm dependencies, so you do not need to run `npm install` for dependencies. You still need the Node.js runtime and npm tools installed before using `npm start` or `npx .`.
+
 ## Usage
 
 ```bash
@@ -52,6 +59,12 @@ You can also run the package as a local executable:
 
 ```bash
 npx . --year 2026
+```
+
+If Node.js is installed but `npx` is unavailable, run the CLI directly:
+
+```bash
+node src/cli.js --year 2026
 ```
 
 ## Merge Multiple Computers
