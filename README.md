@@ -2,6 +2,10 @@
 
 Local-only Codex token usage reporter. It reads Codex session JSONL files from your machine, aggregates token usage, and prints a terminal report or writes a static HTML file.
 
+## Dashboard Preview
+
+![Codex usage heatmap dashboard](assets/codex-usage-heatmap-demo.png)
+
 ## Privacy posture
 
 - Reads `sessions/**/*.jsonl` under `CODEX_HOME` or `~/.codex`; pass `--codex-home` multiple times to merge machines.
