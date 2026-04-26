@@ -1,201 +1,127 @@
 # codex-info
 
-Local-only Codex token usage reporter. It reads Codex session JSONL files from your machine, aggregates token usage, and prints a terminal report or writes a static HTML file.
+Local-only Codex usage reporter. It reads Codex session JSONL files from your machine, aggregates tokens/messages/sessions, and can sync private summaries across devices through a separate private Git repository.
 
 ## Dashboard Preview
 
 ![Codex usage heatmap dashboard](assets/codex-usage-heatmap-demo.png)
 
-## Privacy posture
+## Quick Start
 
-- Reads `sessions/**/*.jsonl` under `CODEX_HOME` or `~/.codex`; pass `--codex-home` multiple times to merge machines.
-- `archived_sessions/*.jsonl` is included only with `--include-archived`.
-- Does not read `auth.json`, `config.toml`, `history.jsonl`, or `logs`.
-- Makes no network requests by default.
-- With `--cost` or `--online-metadata`, fetches OpenAI official pricing metadata from a fixed docs URL without sending local usage, paths, prompts, or statistics. If official parsing fails, it falls back to a public pricing table.
-- With `--sync-git`, syncs token summaries through your private Git repository and updates that repo's README/PNG dashboard. It uploads hashed session ids, project basename hashes, token counts, model, time, and device name; project basenames are omitted unless `--sync-projects` is set.
-- Has no runtime npm dependencies.
-- Does not print prompts or assistant responses.
-- Shows only project basenames by default; pass `--include-project-paths` if you want full paths.
-
-Codex stores token counters in `event_msg` entries where `payload.type` is `token_count`. To avoid duplicate counts, the parser prefers deltas from `payload.info.total_token_usage` and only falls back to `payload.info.last_token_usage` if cumulative totals are absent.
-
-## Prerequisites
-
-- Node.js 18 or newer.
-- npm/npx available in your shell.
-
-This package has no runtime npm dependencies, so you do not need to run `npm install` for dependencies. You still need the Node.js runtime and npm tools installed before using `npm start` or `npx .`.
-
-## Usage
-
-```bash
-npm start
-```
-
-Short wrapped-style report:
+Local report:
 
 ```bash
 npx . 2026 --brief
 ```
 
-Useful variants:
+Fast-mode cost estimate:
 
 ```bash
-npm start -- --year 2026
-npm start -- --year 2026 --brief
-npm start -- --today --brief --cost
-npm start -- --this-week --brief --cost
-npm start -- 2026 --brief --codex-home ~/.codex --codex-home ./imports/macbook --codex-home ./imports/work-wsl
-npm start -- 2026 --group-by week --limit 60 --top-sessions 0
-npm start -- 2026 --heatmap --top-sessions 0
-npm start -- --group-by model --limit 10
-npm start -- --group-by project --include-project-paths
-npm start -- --cost --group-by model
-npm start -- 2026 --brief --cost
-npm start -- 2026 --brief --sync-git git@github.com:YOUR_NAME/codex-info-sync.git --device my-laptop
-npm start -- --json
-npm start -- 2026 --html report/codex-usage.html --sync-git git@github.com:YOUR_NAME/codex-info-sync.git --device my-laptop
-npm run dashboard -- 2026 --sync-git git@github.com:YOUR_NAME/codex-info-sync.git --device laptop
+npx . 2026 --brief --cost --pricing-tier priority
 ```
 
-You can also run the package as a local executable:
+Private multi-device sync with PNG dashboard and interactive HTML report:
 
 ```bash
-npx . --year 2026
+npx . 2026 --brief --cost --pricing-tier priority --html report/codex-usage.html --sync-git git@github.com:YOUR_NAME/codex-info-sync.git --device laptop
 ```
 
-If Node.js is installed but `npx` is unavailable, run the CLI directly:
-
-```bash
-node src/cli.js --year 2026
-```
-
-## Merge Multiple Computers
-
-The easiest ongoing workflow is Git sync. Keep this source repo for the tool code, and use a separate private repo for usage data. Run the same command on every machine with a different `--device` name:
-
-```bash
-npx . 2026 --brief --cost --sync-git git@github.com:YOUR_NAME/codex-info-sync.git --device laptop
-npx . 2026 --brief --cost --sync-git git@github.com:YOUR_NAME/codex-info-sync.git --device desktop
-npx . 2026 --brief --cost --sync-git git@github.com:YOUR_NAME/codex-info-sync.git --device workstation
-```
-
-Each run pulls the private repo, writes only that machine's device file, pushes it back, then reports the merged total across all devices. Running the same machine again updates existing session hashes instead of counting them twice.
-Merged sync reports include a `Device sync` section showing each device's last successful sync time.
-Each sync run also updates the private repo's `README.md` and `assets/codex-usage-heatmap.png`, so the private GitHub repo homepage becomes a visual dashboard for the latest command's date range. Add `--no-sync-readme` if you only want to update the device JSON data.
-Sync always stores project hashes and optional project names from project basenames, even if your local terminal report uses `--include-project-paths`.
-
-Add `--cost` to estimate cost from the merged usage. By default this uses OpenAI's `standard` token prices; pass `--pricing-tier batch`, `--pricing-tier flex`, or `--pricing-tier priority` if that better matches how you used the API.
-
-For Codex fast-mode billing, use `--pricing-tier priority`. This matches the higher fast-mode rates in OpenAI pricing metadata, including `gpt-5.4` at 2x standard pricing and `gpt-5.5` at 2.5x standard pricing:
-
-```bash
-npx . 2026 --brief --cost --pricing-tier priority --sync-git git@github.com:YOUR_NAME/codex-info-sync.git --device laptop
-```
-
-The older manual import workflow also works:
-
-On each other computer, export only Codex session files:
-
-```bash
-tar -czf codex-sessions-$(hostname).tgz -C "${CODEX_HOME:-$HOME/.codex}" sessions archived_sessions 2>/dev/null || tar -czf codex-sessions-$(hostname).tgz -C "${CODEX_HOME:-$HOME/.codex}" sessions
-```
-
-Copy the archives to this machine and extract each one under its own folder:
-
-```bash
-mkdir -p imports/macbook imports/old-wsl
-tar -xzf codex-sessions-macbook.tgz -C imports/macbook
-tar -xzf codex-sessions-old-wsl.tgz -C imports/old-wsl
-```
-
-Then run one merged report:
-
-```bash
-npx . 2026 --brief --codex-home ~/.codex --codex-home imports/macbook --codex-home imports/old-wsl
-```
-
-## Day, Week, and Calendar Views
-
-The commands below pull the private sync repo first, so they report merged usage across all synced devices.
-
-Current day across synced devices:
-
-```bash
-npx . --today --brief --cost --sync-git git@github.com:YOUR_NAME/codex-info-sync.git --device laptop
-```
-
-Current ISO week across synced devices, Monday through Sunday:
-
-```bash
-npx . --this-week --brief --cost --sync-git git@github.com:YOUR_NAME/codex-info-sync.git --device laptop
-```
-
-Every day in a year across synced devices:
-
-```bash
-npx . 2026 --group-by day --limit 366 --top-sessions 0 --sync-git git@github.com:YOUR_NAME/codex-info-sync.git --device laptop
-```
-
-Every week in a year across synced devices:
-
-```bash
-npx . 2026 --group-by week --limit 60 --top-sessions 0 --sync-git git@github.com:YOUR_NAME/codex-info-sync.git --device laptop
-```
-
-GitHub-style yearly token heatmap across synced devices:
-
-```bash
-npx . 2026 --heatmap --top-sessions 0 --sync-git git@github.com:YOUR_NAME/codex-info-sync.git --device laptop
-```
-
-PNG yearly message heatmap:
-
-```bash
-npx . 2026 --png report/codex-heatmap.png --top-sessions 0 --sync-git git@github.com:YOUR_NAME/codex-info-sync.git --device laptop
-```
-
-The PNG dashboard colors the daily grid by user message count, GitHub-contribution style. Token totals and input/output/reasoning details are shown in the surrounding metric panels.
-
-For an interactive private dashboard, add `--html` to the sync command. The HTML heatmap uses the same daily message counts and shows the exact count in a browser tooltip when you hover each day. With `--sync-git`, relative `--html` paths are written into the private sync repo and committed there, not into this public source repo:
-
-```bash
-npx . 2026 --html report/codex-usage.html --cost --pricing-tier priority --sync-git git@github.com:YOUR_NAME/codex-info-sync.git --device laptop
-```
-
-The command prints the absolute HTML path after writing the report. On WSL, open that generated file in your Windows browser with:
+With `--sync-git`, the relative `--html` path is written into the private sync repo, not this public source repo. The command prints the absolute HTML path after generation. On WSL, open it with:
 
 ```bash
 explorer.exe "$(wslpath -w <printed-html-path>)"
 ```
 
-When `--sync-git` is present, the same PNG-style dashboard is also committed to the private sync repo README automatically. For a yearly dashboard in GitHub, run the yearly command above; for today's dashboard, run the `--today` command.
+## Private Sync
 
-Replace `YOUR_NAME/codex-info-sync` with your own private sync repo, and replace `--device laptop` with the current machine's device name. To inspect only the current machine without cloud sync, omit the `--sync-git` and `--device` flags.
-
-## Double-click Local Dashboard
-
-Generate a local HTML dashboard and PNG heatmap, update the private sync repo, then open the dashboard:
+Use one private repo, for example `YOUR_NAME/codex-info-sync`, as the merged usage dashboard. Run the sync command on every machine with a different `--device` name:
 
 ```bash
-npm run dashboard -- 2026 --sync-git git@github.com:YOUR_NAME/codex-info-sync.git --device laptop
+npx . 2026 --brief --cost --pricing-tier priority --html report/codex-usage.html --sync-git git@github.com:YOUR_NAME/codex-info-sync.git --device laptop
+npx . 2026 --brief --cost --pricing-tier priority --html report/codex-usage.html --sync-git git@github.com:YOUR_NAME/codex-info-sync.git --device desktop
 ```
 
-By default this writes files under `~/.codex-info/dashboard/`:
+Each run pulls the private repo, updates that device's JSON data, merges all devices, then updates the private repo's `README.md`, `assets/codex-usage-heatmap.png`, and optional `report/codex-usage.html`.
 
-- `codex-dashboard-2026.html`
-- `codex-heatmap-2026.png`
+Important: the private dashboard image is generated by whichever machine last ran `--sync-git`. If a machine has an older `codex-info` checkout, it can overwrite the private repo dashboard with the old heatmap style. Before syncing from each machine, update this source repo:
 
-Create a local double-click launcher:
+```bash
+git pull --ff-only
+rg "DAILY MESSAGE HEATMAP" src/heatmap-png.js
+```
+
+The `rg` check should print a match. If it does not, that checkout is still old.
+
+## Heatmaps
+
+The PNG dashboard colors the daily grid by user message count, GitHub-contribution style. It also shows total tokens, messages, sessions, active days, start date, cost, top models, and input/cached/output/reasoning token detail.
+
+The HTML report uses the same daily message counts and adds browser tooltips. Hover a day to see the exact count, such as `2026-04-26: 52 messages`.
+
+Terminal heatmap output is still text-only:
+
+```bash
+npx . 2026 --heatmap --top-sessions 0
+```
+
+## Cost
+
+`--cost` fetches public model/pricing metadata from fixed public URLs. It does not send local usage, prompts, paths, or statistics.
+
+By default, costs use OpenAI `standard` token prices. For Codex fast-mode billing, use `--pricing-tier priority`; this matches the higher fast-mode rates in OpenAI pricing metadata, including `gpt-5.4` at 2x standard pricing and `gpt-5.5` at 2.5x standard pricing.
+
+Codex local logs record model and token counts, but not whether a request was standard or fast. Choose the pricing tier manually based on how you used Codex.
+
+## Privacy
+
+- Reads only `sessions/**/*.jsonl` under `CODEX_HOME` or `~/.codex`; `archived_sessions/*.jsonl` is included only with `--include-archived`.
+- Does not read `auth.json`, `config.toml`, `history.jsonl`, or `logs`.
+- Does not print prompts or assistant responses.
+- Shows project basenames by default; pass `--include-project-paths` only if you want full paths locally.
+- Git sync uploads hashed session ids, project basename hashes, token counts, model, timestamps, and device name. Project basenames are omitted unless `--sync-projects` is set.
+- Generated local `report/` files and `launchers/*.local.*` are git-ignored in this public repo.
+
+Codex stores token counters in `event_msg` entries where `payload.type` is `token_count`. To avoid duplicate counts, the parser prefers deltas from `payload.info.total_token_usage` and only falls back to `payload.info.last_token_usage` if cumulative totals are absent.
+
+## Useful Commands
+
+Today across synced devices:
+
+```bash
+npx . --today --brief --cost --pricing-tier priority --sync-git git@github.com:YOUR_NAME/codex-info-sync.git --device laptop
+```
+
+This ISO week across synced devices:
+
+```bash
+npx . --this-week --brief --cost --pricing-tier priority --sync-git git@github.com:YOUR_NAME/codex-info-sync.git --device laptop
+```
+
+Usage by model:
+
+```bash
+npx . 2026 --group-by model --cost --pricing-tier priority
+```
+
+JSON output:
+
+```bash
+npx . 2026 --json
+```
+
+Double-click dashboard launcher:
 
 ```bash
 npm run create-launcher -- --sync-git git@github.com:YOUR_NAME/codex-info-sync.git --device laptop --year 2026
 ```
 
-On Windows WSL, this creates `launchers/codex-info-dashboard.local.cmd`. You can double-click it from Windows Explorer or copy it to your Desktop. On macOS or Linux, pass `--target macos` or `--target unix` if needed.
+On Windows WSL, this creates `launchers/codex-info-dashboard.local.cmd`, which is ignored by git.
 
-Generated `*.local.*` launchers are ignored by git, so your private repo URL and device name do not get committed to the public source repo.
+## Requirements
+
+- Node.js 18 or newer.
+- npm/npx available in your shell.
+- No runtime npm dependencies.
 
 ## Development
 
