@@ -38,6 +38,7 @@ export async function syncGitUsage(localResult, options = {}) {
 
   const after = readAllDeviceFiles(worktree);
   const records = allRecords(after.deviceFiles);
+  const devicesLastSynced = deviceSyncTimes(after.deviceFiles);
   const merged = aggregateRecords(records, {
     ...options,
     syncSummary: {
@@ -49,6 +50,7 @@ export async function syncGitUsage(localResult, options = {}) {
       addedSessions: mergeStats.added,
       updatedSessions: mergeStats.updated,
       devices: after.deviceFiles.size,
+      devicesLastSynced,
       remoteRecords: records.length
     }
   });
@@ -245,6 +247,16 @@ function readAllDeviceFiles(worktree) {
 
 function allRecords(deviceFiles) {
   return Array.from(deviceFiles.values()).flatMap((file) => file.sessions || []);
+}
+
+function deviceSyncTimes(deviceFiles) {
+  return Array.from(deviceFiles.values())
+    .map((file) => ({
+      device: file.device,
+      updatedAt: file.updatedAt || null,
+      sessions: Array.isArray(file.sessions) ? file.sessions.length : 0
+    }))
+    .sort((left, right) => String(left.device).localeCompare(String(right.device)));
 }
 
 function emptyDeviceFile(device) {

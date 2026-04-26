@@ -46,6 +46,7 @@ export function renderTextReport(result, options = {}) {
   if (result.summary.sync) {
     const sync = result.summary.sync;
     lines.push(`${dim("Sync", color)} ${sync.devices} device(s), ${sync.addedSessions} added, ${sync.updatedSessions} updated${sync.pushed ? ", pushed" : ""}`);
+    lines.push(...deviceSyncLines(sync, color));
   }
   if (result.metadata?.errors?.length) {
     lines.push(`${dim("Metadata", color)} ${result.metadata.errors.join("; ")}`);
@@ -111,6 +112,15 @@ export function renderBriefReport(result, options = {}) {
   if (options.heatmap) {
     lines.push("");
     lines.push(renderHeatmap(result, options));
+  }
+
+  if (result.summary.sync?.devicesLastSynced?.length) {
+    lines.push("");
+    lines.push("Device sync:");
+    for (const item of result.summary.sync.devicesLastSynced) {
+      const sessions = typeof item.sessions === "number" ? ` (${formatInt(item.sessions)} sessions)` : "";
+      lines.push(`  ${item.device}: ${compactDate(item.updatedAt)}${sessions}`);
+    }
   }
 
   return lines.join("\n");
@@ -493,6 +503,16 @@ function pricingSourceLabel(result) {
     ? `, ${result.summary.pricedModels}/${result.summary.models} models priced`
     : "";
   return `${source}, ${tier}${priced}`;
+}
+
+function deviceSyncLines(sync, color) {
+  if (!Array.isArray(sync.devicesLastSynced) || !sync.devicesLastSynced.length) return [];
+  const lines = [`${dim("Device sync", color)}`];
+  for (const item of sync.devicesLastSynced) {
+    const sessions = typeof item.sessions === "number" ? ` (${formatInt(item.sessions)} sessions)` : "";
+    lines.push(`  ${item.device}: ${compactDate(item.updatedAt)}${sessions}`);
+  }
+  return lines;
 }
 
 function renderHeatmap(result, options = {}) {

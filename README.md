@@ -64,6 +64,7 @@ npx . 2026 --brief --cost --sync-git git@github.com:hxwangnus/codex-info.git --s
 ```
 
 Each run pulls the private repo, writes only that machine's device file, pushes it back, then reports the merged total across all devices. Running the same machine again updates existing session hashes instead of counting them twice.
+Merged sync reports include a `Device sync` section showing each device's last successful sync time.
 
 Add `--cost` to estimate cost from the merged usage. By default this uses OpenAI's `standard` token prices; pass `--pricing-tier batch`, `--pricing-tier flex`, or `--pricing-tier priority` if that better matches how you used the API.
 

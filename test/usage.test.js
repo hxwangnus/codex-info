@@ -99,6 +99,8 @@ test("syncs through a private Git-style remote without double counting reruns", 
   assert.equal(mergedB.summary.sessions, 2);
   assert.equal(mergedB.summary.devices, 2);
   assert.equal(mergedB.summary.usage.totalTokens, 30);
+  assert.deepEqual(mergedB.summary.sync.devicesLastSynced.map((item) => item.device), ["macbook", "xps13"]);
+  assert.ok(mergedB.summary.sync.devicesLastSynced.every((item) => item.updatedAt));
 
   const rerunA = await syncGitUsage(localA, { syncGit: remote, syncCache: path.join(cacheA, "repo"), syncDevice: "xps13", year: "2026" });
   assert.equal(rerunA.summary.sessions, 2);
@@ -143,6 +145,32 @@ test("brief report prints estimated cost without numeric formatting loss", () =>
   }, { year: "2026", topModels: 1 });
   assert.match(text, /estimated:\s+\$0\.1234/);
   assert.match(text, /gpt-test\s+15 tokens\s+\$0\.1234/);
+});
+
+test("brief report prints per-device sync times", () => {
+  const text = renderBriefReport({
+    summary: {
+      sessions: 1,
+      userMessages: 1,
+      activeDays: 1,
+      projects: 1,
+      models: 1,
+      usage: { inputTokens: 10, cachedInputTokens: 0, outputTokens: 5, reasoningOutputTokens: 2, totalTokens: 15 },
+      sync: {
+        devicesLastSynced: [
+          { device: "macbook16", updatedAt: "2026-04-26T01:02:03.000Z", sessions: 7 },
+          { device: "xps13", updatedAt: "2026-04-26T02:03:04.000Z", sessions: 9 }
+        ]
+      },
+      dateRange: { start: "2026-01-01T00:00:00.000Z", end: "2026-01-01T00:00:00.000Z" }
+    },
+    groups: {
+      model: [{ model: "gpt-test", usage: { totalTokens: 15 } }]
+    }
+  }, { year: "2026", topModels: 1 });
+  assert.match(text, /Device sync:/);
+  assert.match(text, /macbook16: 2026-04-26 01:02:03 UTC/);
+  assert.match(text, /xps13: 2026-04-26 02:03:04 UTC/);
 });
 
 test("filters a local date range and keeps weekly groups", async () => {
