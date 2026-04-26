@@ -6,6 +6,8 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { collectUsage, normalizeUsage, diffUsage } from "../src/usage.js";
 import { syncGitUsage } from "../src/sync-git.js";
+import { parseOpenAiPricingMarkdown } from "../src/metadata.js";
+import { renderBriefReport } from "../src/format.js";
 
 test("normalizes usage field aliases", () => {
   assert.deepEqual(normalizeUsage({
@@ -100,6 +102,46 @@ test("syncs through a private Git-style remote without double counting reruns", 
   const rerunA = await syncGitUsage(localA, { syncGit: remote, syncCache: path.join(cacheA, "repo"), syncDevice: "xps13", year: "2026" });
   assert.equal(rerunA.summary.sessions, 2);
   assert.equal(rerunA.summary.usage.totalTokens, 30);
+});
+
+test("parses OpenAI official pricing markdown rows", () => {
+  const markdown = `
+<div data-content-switcher-pane data-value="standard">
+  <TextTokenPricingTables
+    tier="standard"
+    rows={[
+      ["gpt-test (<272K context length)", 2.5, 0.25, 15],
+      ["gpt-test-mini", 0.5, 0.05, 2],
+    ]}
+  />
+</div>`;
+  const pricing = parseOpenAiPricingMarkdown(markdown, "standard");
+  assert.equal(pricing.get("gpt-test").inputCostPerMillionTokens, 2.5);
+  assert.equal(pricing.get("gpt-test").cachedInputCostPerMillionTokens, 0.25);
+  assert.equal(pricing.get("gpt-test").outputCostPerMillionTokens, 15);
+});
+
+test("brief report prints estimated cost without numeric formatting loss", () => {
+  const text = renderBriefReport({
+    summary: {
+      sessions: 1,
+      userMessages: 1,
+      activeDays: 1,
+      projects: 1,
+      models: 1,
+      usage: { inputTokens: 10, cachedInputTokens: 0, outputTokens: 5, reasoningOutputTokens: 2, totalTokens: 15 },
+      estimatedCostUSD: 0.1234,
+      pricedModels: 1,
+      pricingSource: "openai",
+      pricingTier: "standard",
+      dateRange: { start: "2026-01-01T00:00:00.000Z", end: "2026-01-01T00:00:00.000Z" }
+    },
+    groups: {
+      model: [{ model: "gpt-test", usage: { totalTokens: 15 }, estimatedCostUSD: 0.1234 }]
+    }
+  }, { year: "2026", topModels: 1 });
+  assert.match(text, /estimated:\s+\$0\.1234/);
+  assert.match(text, /gpt-test\s+15 tokens\s+\$0\.1234/);
 });
 
 async function writeSession(root, id, timestamp, cwd, model, totalTokens) {

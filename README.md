@@ -8,7 +8,7 @@ Local-only Codex token usage reporter. It reads Codex session JSONL files from y
 - `archived_sessions/*.jsonl` is included only with `--include-archived`.
 - Does not read `auth.json`, `config.toml`, `history.jsonl`, or `logs`.
 - Makes no network requests by default.
-- With `--cost` or `--online-metadata`, fetches public model/pricing metadata from fixed URLs without sending local usage, paths, prompts, or statistics.
+- With `--cost` or `--online-metadata`, fetches OpenAI official pricing metadata from a fixed docs URL without sending local usage, paths, prompts, or statistics. If official parsing fails, it falls back to a public pricing table.
 - With `--sync-git`, syncs token summaries through your private Git repository. It uploads hashed session ids, token counts, model, time, and device name; project names are omitted unless `--sync-projects` is set.
 - Has no runtime npm dependencies.
 - Does not print prompts or assistant responses.
@@ -37,6 +37,7 @@ npm start -- 2026 --brief --codex-home ~/.codex --codex-home ./imports/macbook -
 npm start -- --group-by model --limit 10
 npm start -- --group-by project --include-project-paths
 npm start -- --cost --group-by model
+npm start -- 2026 --brief --cost
 npm start -- 2026 --brief --sync-git git@github.com:YOU/codex-info-sync.git --device xps13
 npm start -- --json
 npm start -- --html report/codex-usage.html
@@ -54,11 +55,14 @@ The easiest ongoing workflow is Git sync. Create one empty private repository, t
 
 ```bash
 npx . 2026 --brief --sync-git git@github.com:YOU/codex-info-sync.git --device xps13
+npx . 2026 --brief --cost --sync-git git@github.com:YOU/codex-info-sync.git --sync-branch usage-sync --device xps13
 npx . 2026 --brief --sync-git git@github.com:YOU/codex-info-sync.git --device macbook
 npx . 2026 --brief --sync-git git@github.com:YOU/codex-info-sync.git --device blade18
 ```
 
 Each run pulls the private repo, writes only that machine's device file, pushes it back, then reports the merged total across all devices. Running the same machine again updates existing session hashes instead of counting them twice.
+
+Add `--cost` to estimate cost from the merged usage. By default this uses OpenAI's `standard` token prices; pass `--pricing-tier batch`, `--pricing-tier flex`, or `--pricing-tier priority` if that better matches how you used the API.
 
 The older manual import workflow also works:
 

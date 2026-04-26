@@ -79,6 +79,12 @@ export function renderBriefReport(result, options = {}) {
   lines.push(tokenLine("output", result.summary.usage.outputTokens));
   lines.push(tokenLine("reasoning", result.summary.usage.reasoningOutputTokens));
   lines.push(tokenLine("total", result.summary.usage.totalTokens));
+  if (typeof result.summary.estimatedCostUSD === "number") {
+    lines.push("");
+    lines.push("Cost:");
+    lines.push(valueLine("estimated", formatUsd(result.summary.estimatedCostUSD)));
+    lines.push(`  source:          ${pricingSourceLabel(result)}`);
+  }
   lines.push("");
   lines.push("Top models:");
 
@@ -88,7 +94,8 @@ export function renderBriefReport(result, options = {}) {
   } else {
     const modelWidth = Math.max(...topModels.map((row) => row.model.length), 1);
     for (const row of topModels) {
-      lines.push(`  ${row.model.padEnd(modelWidth)}  ${formatInt(row.usage.totalTokens)} tokens`);
+      const cost = typeof row.estimatedCostUSD === "number" ? `  ${formatUsd(row.estimatedCostUSD)}` : "";
+      lines.push(`  ${row.model.padEnd(modelWidth)}  ${formatInt(row.usage.totalTokens)} tokens${cost}`);
     }
   }
 
@@ -443,6 +450,10 @@ function tokenLine(label, value) {
   return `  ${`${label}:`.padEnd(16)}${formatInt(value).padStart(12)}`;
 }
 
+function valueLine(label, value) {
+  return `  ${`${label}:`.padEnd(16)}${String(value).padStart(12)}`;
+}
+
 function reportYear(result, options) {
   if (options.year) return options.year;
   const startYear = result.summary.dateRange?.start?.slice(0, 4);
@@ -457,6 +468,15 @@ function formatUsd(value) {
     currency: "USD",
     maximumFractionDigits: value < 1 ? 4 : 2
   }).format(value || 0);
+}
+
+function pricingSourceLabel(result) {
+  const source = result.summary.pricingSource === "openai" ? "OpenAI official pricing" : "fallback pricing";
+  const tier = result.summary.pricingTier || "standard";
+  const priced = typeof result.summary.pricedModels === "number" && typeof result.summary.models === "number"
+    ? `, ${result.summary.pricedModels}/${result.summary.models} models priced`
+    : "";
+  return `${source}, ${tier}${priced}`;
 }
 
 function dataRootLabel(summary) {

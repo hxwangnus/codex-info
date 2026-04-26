@@ -45,6 +45,7 @@ function parseArgs(argv) {
     includeFiles: false,
     includeArchived: false,
     onlineMetadata: false,
+    pricingTier: "standard",
     syncGit: "",
     syncBranch: "main",
     syncCache: "",
@@ -81,6 +82,8 @@ function parseArgs(argv) {
       options.brief = true;
     } else if (arg === "--online-metadata" || arg === "--cost") {
       options.onlineMetadata = true;
+    } else if (arg === "--pricing-tier") {
+      options.pricingTier = oneOf(requiredValue(argv, ++index, arg), ["standard", "batch", "flex", "priority"], arg);
     } else if (arg === "--sync-git") {
       options.syncGit = requiredValue(argv, ++index, arg);
     } else if (arg === "--sync-branch") {
@@ -149,6 +152,7 @@ Options:
   --json                     Print machine-readable JSON
   --html <file>              Write a self-contained local HTML report
   --cost, --online-metadata  Fetch public model/pricing metadata and estimate cost
+  --pricing-tier <tier>      standard, batch, flex, or priority (default: standard)
   --sync-git <repo-url>      Sync usage through your private Git repository
   --device <name>            Device name for --sync-git (default: hostname)
   --sync-branch <branch>     Git sync branch (default: main)
@@ -164,6 +168,7 @@ Privacy:
   Reads sessions/**/*.jsonl from each --codex-home, and archived_sessions/*.jsonl only with --include-archived.
   Does not read auth.json, config.toml, history.jsonl, or logs.
   Makes no network requests unless --online-metadata/--cost or --sync-git is set.
+  Cost uses OpenAI official pricing docs when available, falling back to a public pricing table.
   Online metadata requests use fixed public URLs and send no local usage data.
   Git sync uploads hashed session ids, token counts, model, time, and device name.
   Project names are not uploaded unless --sync-projects is set.
