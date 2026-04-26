@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import { collectUsage, normalizeUsage, diffUsage } from "../src/usage.js";
 import { syncGitUsage, updateSyncReadme } from "../src/sync-git.js";
 import { parseOpenAiPricingMarkdown } from "../src/metadata.js";
-import { renderBriefReport } from "../src/format.js";
+import { renderBriefReport, renderHtmlReport } from "../src/format.js";
 import { renderHeatmapPng, writeHeatmapPng } from "../src/heatmap-png.js";
 
 test("normalizes usage field aliases", () => {
@@ -242,6 +242,32 @@ test("renders a PNG heatmap", async () => {
   const file = await writeHeatmapPng(result, path.join(dir, "heatmap.png"), { year: "2026" });
   const stat = await fs.promises.stat(file);
   assert.ok(stat.size > 1000);
+});
+
+test("HTML dashboard can embed a local heatmap image", () => {
+  const html = renderHtmlReport({
+    summary: {
+      sessions: 1,
+      userMessages: 1,
+      activeDays: 1,
+      projects: 1,
+      models: 1,
+      tokenEvents: 1,
+      usage: { inputTokens: 10, cachedInputTokens: 0, outputTokens: 5, reasoningOutputTokens: 0, totalTokens: 15 },
+      dateRange: { start: "2026-01-01T00:00:00.000Z", end: "2026-01-01T00:00:00.000Z" }
+    },
+    groups: {
+      day: [{ date: "2026-01-01", sessions: 1, usage: { inputTokens: 10, cachedInputTokens: 0, outputTokens: 5, totalTokens: 15 } }]
+    },
+    sessions: []
+  }, {
+    year: "2026",
+    topSessions: 0,
+    heatmapImage: "codex-heatmap-2026.png"
+  });
+
+  assert.match(html, /Usage Heatmap/);
+  assert.match(html, /codex-heatmap-2026\.png/);
 });
 
 async function writeSession(root, id, timestamp, cwd, model, totalTokens) {

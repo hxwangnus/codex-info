@@ -45,6 +45,7 @@ npm start -- 2026 --brief --cost
 npm start -- 2026 --brief --sync-git git@github.com:YOUR_NAME/codex-info-sync.git --device my-laptop
 npm start -- --json
 npm start -- --html report/codex-usage.html
+npm run dashboard -- 2026 --sync-git git@github.com:YOUR_NAME/codex-info-sync.git --device laptop
 ```
 
 You can also run the package as a local executable:
@@ -135,6 +136,29 @@ npx . 2026 --png report/codex-heatmap.png --top-sessions 0 --sync-git git@github
 When `--sync-git` is present, the same PNG-style dashboard is also committed to the private sync repo README automatically. For a yearly dashboard in GitHub, run the yearly command above; for today's dashboard, run the `--today` command.
 
 Replace `YOUR_NAME/codex-info-sync` with your own private sync repo, and replace `--device laptop` with the current machine's device name. To inspect only the current machine without cloud sync, omit the `--sync-git` and `--device` flags.
+
+## Double-click Local Dashboard
+
+Generate a local HTML dashboard and PNG heatmap, update the private sync repo, then open the dashboard:
+
+```bash
+npm run dashboard -- 2026 --sync-git git@github.com:YOUR_NAME/codex-info-sync.git --device laptop
+```
+
+By default this writes files under `~/.codex-info/dashboard/`:
+
+- `codex-dashboard-2026.html`
+- `codex-heatmap-2026.png`
+
+Create a local double-click launcher:
+
+```bash
+npm run create-launcher -- --sync-git git@github.com:YOUR_NAME/codex-info-sync.git --device laptop --year 2026
+```
+
+On Windows WSL, this creates `launchers/codex-info-dashboard.local.cmd`. You can double-click it from Windows Explorer or copy it to your Desktop. On macOS or Linux, pass `--target macos` or `--target unix` if needed.
+
+Generated `*.local.*` launchers are ignored by git, so your private repo URL and device name do not get committed to the public source repo.
 
 ## Development
 

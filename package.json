@@ -8,6 +8,8 @@
   },
   "scripts": {
     "start": "node src/cli.js",
+    "dashboard": "node scripts/dashboard.js",
+    "create-launcher": "node scripts/create-launcher.js",
     "test": "node --test"
   },
   "engines": {

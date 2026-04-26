@@ -273,6 +273,19 @@ export function renderHtmlReport(result, options = {}) {
       background: linear-gradient(90deg, var(--accent), var(--accent-2));
       border-radius: inherit;
     }
+    .heatmap-frame {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      overflow-x: auto;
+    }
+    .heatmap-frame img {
+      display: block;
+      width: 100%;
+      min-width: 760px;
+      height: auto;
+    }
     footer {
       color: var(--muted);
       margin-top: 22px;
@@ -308,6 +321,8 @@ export function renderHtmlReport(result, options = {}) {
       ${metric("Models", formatInt(result.summary.models))}
     </div>
 
+    ${htmlHeatmapImage(options)}
+
     <section>
       <h2>${escapeHtml(groupTitle(groupBy))}</h2>
       <table>
@@ -334,6 +349,14 @@ export function renderHtmlReport(result, options = {}) {
   </main>
 </body>
 </html>`;
+}
+
+function htmlHeatmapImage(options) {
+  if (!options.heatmapImage) return "";
+  return `<section>
+      <h2>Usage Heatmap</h2>
+      <div class="heatmap-frame"><img src="${escapeHtml(options.heatmapImage)}" alt="Codex usage heatmap"></div>
+    </section>`;
 }
 
 function htmlTopSessions(result, options) {
