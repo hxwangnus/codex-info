@@ -84,6 +84,12 @@ Sync always stores project hashes and optional project names from project basena
 
 Add `--cost` to estimate cost from the merged usage. By default this uses OpenAI's `standard` token prices; pass `--pricing-tier batch`, `--pricing-tier flex`, or `--pricing-tier priority` if that better matches how you used the API.
 
+For Codex fast-mode billing, use `--pricing-tier priority`. This matches the higher fast-mode rates in OpenAI pricing metadata, including `gpt-5.4` at 2x standard pricing and `gpt-5.5` at 2.5x standard pricing:
+
+```bash
+npx . 2026 --brief --cost --pricing-tier priority --sync-git git@github.com:YOUR_NAME/codex-info-sync.git --device laptop
+```
+
 The older manual import workflow also works:
 
 On each other computer, export only Codex session files:
