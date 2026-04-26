@@ -1,0 +1,17 @@
+{
+  "name": "codex-info",
+  "version": "0.1.0",
+  "description": "Local-only Codex token usage reporter.",
+  "type": "module",
+  "bin": {
+    "codex-info": "src/cli.js"
+  },
+  "scripts": {
+    "start": "node src/cli.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}

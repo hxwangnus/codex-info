@@ -1,0 +1,422 @@
+import crypto from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { execFileSync } from "node:child_process";
+import { addUsage, emptyUsage } from "./usage.js";
+
+const SYNC_SCHEMA_VERSION = 1;
+const DATA_DIR = "codex-info/devices";
+
+export async function syncGitUsage(localResult, options = {}) {
+  const repoUrl = options.syncGit;
+  if (!repoUrl) return localResult;
+
+  const branch = options.syncBranch || "main";
+  const device = safeDeviceName(options.syncDevice || os.hostname() || "unknown-device");
+  const worktree = syncWorktree(repoUrl, options.syncCache);
+
+  ensureGitRepo(repoUrl, worktree, branch);
+
+  const before = readAllDeviceFiles(worktree);
+  const currentPath = path.join(worktree, DATA_DIR, `${device}.json`);
+  const current = before.deviceFiles.get(device) || emptyDeviceFile(device);
+  const localRecords = localResult.sessions.map((session) => sessionToRecord(session, device, options));
+  const mergeStats = mergeRecordsIntoDevice(current, localRecords);
+
+  await fs.promises.mkdir(path.dirname(currentPath), { recursive: true });
+  await fs.promises.writeFile(currentPath, `${stableJson(current)}\n`, "utf8");
+
+  const changed = hasGitChanges(worktree);
+  let pushed = false;
+  if (changed) {
+    git(worktree, ["add", currentPath]);
+    git(worktree, ["commit", "-m", `Update Codex usage for ${device}`], { commitEnv: true });
+    pushed = pushWithRetry(worktree, branch);
+  }
+
+  const after = readAllDeviceFiles(worktree);
+  const records = allRecords(after.deviceFiles);
+  const merged = aggregateRecords(records, {
+    ...options,
+    syncSummary: {
+      device,
+      repoUrl,
+      branch,
+      worktree,
+      pushed,
+      addedSessions: mergeStats.added,
+      updatedSessions: mergeStats.updated,
+      devices: after.deviceFiles.size,
+      remoteRecords: records.length
+    }
+  });
+
+  return merged;
+}
+
+function ensureGitRepo(repoUrl, worktree, branch) {
+  if (!fs.existsSync(path.join(worktree, ".git"))) {
+    fs.mkdirSync(path.dirname(worktree), { recursive: true });
+    execFileSync("git", ["clone", repoUrl, worktree], { stdio: "pipe" });
+  }
+
+  const currentUrl = git(worktree, ["remote", "get-url", "origin"], { optional: true })?.trim();
+  if (currentUrl && currentUrl !== repoUrl) {
+    throw new Error(`Sync cache already points to a different repo: ${currentUrl}`);
+  }
+
+  git(worktree, ["fetch", "origin"], { optional: true });
+  const hasRemoteBranch = Boolean(git(worktree, ["rev-parse", "--verify", `origin/${branch}`], { optional: true }));
+  if (hasRemoteBranch) {
+    git(worktree, ["checkout", "-B", branch, `origin/${branch}`]);
+    git(worktree, ["pull", "--rebase", "origin", branch], { optional: true });
+  } else {
+    git(worktree, ["checkout", "-B", branch]);
+  }
+}
+
+function pushWithRetry(worktree, branch) {
+  const pushed = git(worktree, ["push", "-u", "origin", branch], { optional: true });
+  if (pushed !== null) return true;
+
+  git(worktree, ["pull", "--rebase", "origin", branch], { optional: true });
+  const retry = git(worktree, ["push", "-u", "origin", branch], { optional: true });
+  if (retry === null) {
+    throw new Error("Git sync push failed. Run the command again after checking your private repo access.");
+  }
+  return true;
+}
+
+function sessionToRecord(session, device, options) {
+  const project = session.project && session.project !== "unknown" ? session.project : "";
+  return {
+    id: hashValue(`session:${session.id}`),
+    schemaVersion: SYNC_SCHEMA_VERSION,
+    device,
+    startedAt: session.startedAt,
+    lastActivityAt: session.lastActivityAt,
+    model: session.model || "unknown",
+    effort: session.effort || "",
+    source: session.source || "",
+    userMessages: session.userMessages || 0,
+    tokenEvents: session.tokenEvents || 0,
+    projectHash: project ? hashValue(`project:${project}`) : "",
+    project: options.syncProjects && project ? project : undefined,
+    usage: normalizeStoredUsage(session.usage)
+  };
+}
+
+function mergeRecordsIntoDevice(deviceFile, records) {
+  const byId = new Map(deviceFile.sessions.map((record) => [record.id, record]));
+  let added = 0;
+  let updated = 0;
+
+  for (const record of records) {
+    const existing = byId.get(record.id);
+    if (!existing) {
+      byId.set(record.id, record);
+      added += 1;
+    } else if (stableJson(existing) !== stableJson(record)) {
+      byId.set(record.id, { ...existing, ...record });
+      updated += 1;
+    }
+  }
+
+  deviceFile.schemaVersion = SYNC_SCHEMA_VERSION;
+  deviceFile.updatedAt = new Date().toISOString();
+  deviceFile.sessions = Array.from(byId.values()).sort(compareRecords);
+  return { added, updated };
+}
+
+function aggregateRecords(records, options) {
+  const byId = new Map();
+  let duplicateSessions = 0;
+  for (const record of records) {
+    if (!record?.id || !isRecordInRange(record, options)) continue;
+    if (byId.has(record.id)) {
+      duplicateSessions += 1;
+      continue;
+    }
+    byId.set(record.id, normalizeRecord(record));
+  }
+
+  const sessions = Array.from(byId.values()).sort((a, b) => (b.usage.totalTokens || 0) - (a.usage.totalTokens || 0));
+  const dayMap = new Map();
+  const modelMap = new Map();
+  const projectMap = new Map();
+  const activeDays = new Set();
+  const projects = new Set();
+  const models = new Set();
+  const devices = new Set();
+  const usage = emptyUsage();
+  let userMessages = 0;
+  let tokenEvents = 0;
+  let start = null;
+  let end = null;
+
+  for (const session of sessions) {
+    addUsage(usage, session.usage);
+    userMessages += session.userMessages;
+    tokenEvents += session.tokenEvents;
+    if (session.device) devices.add(session.device);
+    if (session.model) models.add(session.model);
+    const projectKey = session.projectHash || session.project || "unknown";
+    if (projectKey !== "unknown") projects.add(projectKey);
+    const startedAt = parseDate(session.startedAt);
+    const lastActivityAt = parseDate(session.lastActivityAt) || startedAt;
+    if (startedAt) start = minDate(start, startedAt);
+    if (lastActivityAt) end = maxDate(end, lastActivityAt);
+    const day = dateKey(lastActivityAt || startedAt);
+    if (day) activeDays.add(day);
+    addGroup(dayMap, day, session);
+    addGroup(modelMap, session.model || "unknown", session);
+    addGroup(projectMap, projectLabel(session), session);
+  }
+
+  return {
+    summary: {
+      codexHome: "synced",
+      codexHomes: [],
+      sessionsRoot: `git sync (${options.syncSummary?.devices || devices.size} devices)`,
+      sessionRoots: [],
+      sessions: sessions.length,
+      filesScanned: 0,
+      duplicateSessions,
+      tokenEvents,
+      userMessages,
+      activeDays: activeDays.size,
+      projects: projects.size,
+      models: models.size,
+      devices: devices.size,
+      parseErrors: 0,
+      skippedTokenEvents: 0,
+      dateRange: start || end ? {
+        start: start?.toISOString() || null,
+        end: end?.toISOString() || null
+      } : null,
+      usage,
+      sync: options.syncSummary
+    },
+    groups: {
+      day: finalizeGroups(dayMap, "date"),
+      model: finalizeGroups(modelMap, "model"),
+      project: finalizeGroups(projectMap, "project")
+    },
+    sessions
+  };
+}
+
+function readAllDeviceFiles(worktree) {
+  const dir = path.join(worktree, DATA_DIR);
+  const deviceFiles = new Map();
+  if (!fs.existsSync(dir)) return { deviceFiles };
+
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+    const file = path.join(dir, entry.name);
+    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+    if (!parsed?.device || !Array.isArray(parsed.sessions)) continue;
+    deviceFiles.set(parsed.device, {
+      schemaVersion: parsed.schemaVersion || SYNC_SCHEMA_VERSION,
+      device: parsed.device,
+      updatedAt: parsed.updatedAt || null,
+      sessions: parsed.sessions.map(normalizeRecord)
+    });
+  }
+  return { deviceFiles };
+}
+
+function allRecords(deviceFiles) {
+  return Array.from(deviceFiles.values()).flatMap((file) => file.sessions || []);
+}
+
+function emptyDeviceFile(device) {
+  return {
+    schemaVersion: SYNC_SCHEMA_VERSION,
+    device,
+    updatedAt: null,
+    sessions: []
+  };
+}
+
+function normalizeRecord(record) {
+  return {
+    id: String(record.id || ""),
+    schemaVersion: record.schemaVersion || SYNC_SCHEMA_VERSION,
+    device: String(record.device || "unknown-device"),
+    startedAt: record.startedAt || null,
+    lastActivityAt: record.lastActivityAt || record.startedAt || null,
+    model: record.model || "unknown",
+    effort: record.effort || "",
+    source: record.source || "",
+    userMessages: Number(record.userMessages) || 0,
+    tokenEvents: Number(record.tokenEvents) || 0,
+    projectHash: record.projectHash || "",
+    project: record.project || undefined,
+    usage: normalizeStoredUsage(record.usage)
+  };
+}
+
+function normalizeStoredUsage(usage = {}) {
+  return {
+    inputTokens: Number(usage.inputTokens) || 0,
+    cachedInputTokens: Number(usage.cachedInputTokens) || 0,
+    outputTokens: Number(usage.outputTokens) || 0,
+    reasoningOutputTokens: Number(usage.reasoningOutputTokens) || 0,
+    totalTokens: Number(usage.totalTokens) || 0
+  };
+}
+
+function addGroup(map, key, session) {
+  if (!key) return;
+  const group = map.get(key) || {
+    key,
+    sessions: 0,
+    userMessages: 0,
+    tokenEvents: 0,
+    usage: emptyUsage()
+  };
+  group.sessions += 1;
+  group.userMessages += session.userMessages;
+  group.tokenEvents += session.tokenEvents;
+  addUsage(group.usage, session.usage);
+  map.set(key, group);
+}
+
+function finalizeGroups(map, keyName) {
+  return Array.from(map.values())
+    .sort((a, b) => {
+      if (keyName === "date") return String(a.key).localeCompare(String(b.key));
+      return (b.usage.totalTokens || 0) - (a.usage.totalTokens || 0);
+    })
+    .map((group) => ({
+      [keyName]: group.key,
+      sessions: group.sessions,
+      userMessages: group.userMessages,
+      tokenEvents: group.tokenEvents,
+      usage: group.usage
+    }));
+}
+
+function isRecordInRange(record, options) {
+  const date = parseDate(record.startedAt || record.lastActivityAt);
+  if (!date) return true;
+  if (options.year && String(date.getUTCFullYear()) !== String(options.year)) return false;
+  if (options.since && date < startOfDay(options.since)) return false;
+  if (options.until && date >= dayAfter(options.until)) return false;
+  return true;
+}
+
+function syncWorktree(repoUrl, syncCache) {
+  if (syncCache) return path.resolve(expandHome(syncCache));
+  return path.join(os.homedir(), ".codex-info", "sync", hashValue(repoUrl).slice(0, 16));
+}
+
+function git(cwd, args, options = {}) {
+  try {
+    return execFileSync("git", args, {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      env: options.commitEnv ? commitEnv() : process.env
+    });
+  } catch (error) {
+    if (options.optional) return null;
+    const stderr = error.stderr?.toString()?.trim();
+    throw new Error(stderr || `git ${args.join(" ")} failed`);
+  }
+}
+
+function hasGitChanges(worktree) {
+  return Boolean(git(worktree, ["status", "--porcelain"], { optional: true })?.trim());
+}
+
+function commitEnv() {
+  return {
+    ...process.env,
+    GIT_AUTHOR_NAME: process.env.GIT_AUTHOR_NAME || "codex-info",
+    GIT_AUTHOR_EMAIL: process.env.GIT_AUTHOR_EMAIL || "codex-info@local",
+    GIT_COMMITTER_NAME: process.env.GIT_COMMITTER_NAME || "codex-info",
+    GIT_COMMITTER_EMAIL: process.env.GIT_COMMITTER_EMAIL || "codex-info@local"
+  };
+}
+
+function safeDeviceName(value) {
+  const name = String(value || "unknown-device")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return name || "unknown-device";
+}
+
+function hashValue(value) {
+  return crypto.createHash("sha256").update(String(value)).digest("hex");
+}
+
+function stableJson(value) {
+  return JSON.stringify(sortObject(value), null, 2);
+}
+
+function sortObject(value) {
+  if (Array.isArray(value)) return value.map(sortObject);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([, child]) => child !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, child]) => [key, sortObject(child)])
+  );
+}
+
+function compareRecords(left, right) {
+  return String(left.startedAt || "").localeCompare(String(right.startedAt || ""))
+    || String(left.id).localeCompare(String(right.id));
+}
+
+function projectLabel(session) {
+  if (session.project) return session.project;
+  if (session.projectHash) return `project:${session.projectHash.slice(0, 8)}`;
+  return "unknown";
+}
+
+function dateKey(date) {
+  const parsed = parseDate(date);
+  return parsed ? parsed.toISOString().slice(0, 10) : "";
+}
+
+function parseDate(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function startOfDay(value) {
+  const text = String(value);
+  const date = text.length <= 10 ? new Date(`${text}T00:00:00.000Z`) : new Date(text);
+  if (Number.isNaN(date.getTime())) throw new Error(`Invalid date: ${value}`);
+  return date;
+}
+
+function dayAfter(value) {
+  const date = startOfDay(value);
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date;
+}
+
+function minDate(left, right) {
+  if (!left) return right;
+  return right < left ? right : left;
+}
+
+function maxDate(left, right) {
+  if (!left) return right;
+  return right > left ? right : left;
+}
+
+function expandHome(value) {
+  if (!value || value === "~") return os.homedir();
+  if (value.startsWith("~/")) return path.join(os.homedir(), value.slice(2));
+  return value;
+}
