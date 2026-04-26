@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -103,11 +104,30 @@ read -r _
 }
 
 function windowsWslLauncher(options) {
-  const command = `cd ${shellQuote(repoRoot)} && node scripts/dashboard.js ${dashboardArgs(options)}`;
+  const dashboardOptions = { ...options, open: "none" };
+  const command = `cd ${shellQuote(repoRoot)} && node scripts/dashboard.js ${dashboardArgs(dashboardOptions)}`;
+  const target = options.open === "png" ? dashboardPngPath(options) : dashboardHtmlPath(options);
   return `@echo off
 setlocal
-wsl.exe -e bash -lc "${escapeForCmdDoubleQuote(command)}"
-if errorlevel 1 pause
+set "LOG=%USERPROFILE%\\Desktop\\Codex Info Dashboard.log"
+echo [%DATE% %TIME%] Updating Codex Info dashboard... > "%LOG%"
+wsl.exe -e bash -lc "${escapeForCmdDoubleQuote(command)}" >> "%LOG%" 2>&1
+if errorlevel 1 (
+  type "%LOG%"
+  echo.
+  echo Dashboard update failed. The log is at "%LOG%".
+  pause
+  exit /b 1
+)
+${options.open === "none" ? "" : `powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '${escapeForPowerShellSingleQuoted(target)}'" >> "%LOG%" 2>&1
+if errorlevel 1 (
+  type "%LOG%"
+  echo.
+  echo Dashboard was generated, but Windows could not open it. The log is at "%LOG%".
+  pause
+  exit /b 1
+)`}
+exit /b 0
 `;
 }
 
@@ -139,6 +159,23 @@ function isWsl() {
   }
 }
 
+function dashboardHtmlPath(options) {
+  return windowsPathFromWslPath(path.join(os.homedir(), ".codex-info", "dashboard", `codex-dashboard-${options.year}.html`));
+}
+
+function dashboardPngPath(options) {
+  return windowsPathFromWslPath(path.join(os.homedir(), ".codex-info", "dashboard", `codex-heatmap-${options.year}.png`));
+}
+
+function windowsPathFromWslPath(value) {
+  try {
+    return execFileSync("wslpath", ["-w", value], { encoding: "utf8" }).trim();
+  } catch {
+    const distro = process.env.WSL_DISTRO_NAME || "Ubuntu";
+    return `\\\\wsl.localhost\\${distro}${value.replaceAll("/", "\\")}`;
+  }
+}
+
 function requiredValue(argv, index, flag) {
   const value = argv[index];
   if (!value || value.startsWith("--")) throw new Error(`${flag} requires a value`);
@@ -156,6 +193,10 @@ function shellQuote(value) {
 
 function escapeForCmdDoubleQuote(value) {
   return value.replaceAll("%", "%%").replaceAll('"', '\\"');
+}
+
+function escapeForPowerShellSingleQuoted(value) {
+  return String(value).replaceAll("'", "''");
 }
 
 function helpText() {

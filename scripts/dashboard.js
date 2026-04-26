@@ -140,10 +140,20 @@ function openFile(file) {
   }
   if (isWsl()) {
     const windowsPath = execFileSync("wslpath", ["-w", fullPath], { encoding: "utf8" }).trim();
-    spawn("cmd.exe", ["/c", "start", "", windowsPath], { detached: true, stdio: "ignore" }).unref();
+    spawn("powershell.exe", [
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-Command",
+      `Start-Process -FilePath ${powershellQuote(windowsPath)}`
+    ], { detached: true, stdio: "ignore" }).unref();
     return;
   }
   spawn("xdg-open", [fullPath], { detached: true, stdio: "ignore" }).unref();
+}
+
+function powershellQuote(value) {
+  return `'${String(value).replaceAll("'", "''")}'`;
 }
 
 function isWsl() {
