@@ -146,11 +146,13 @@ GitHub-style yearly token heatmap across synced devices:
 npx . 2026 --heatmap --top-sessions 0 --sync-git git@github.com:YOUR_NAME/codex-info-sync.git --device laptop
 ```
 
-PNG yearly token heatmap:
+PNG yearly message heatmap:
 
 ```bash
 npx . 2026 --png report/codex-heatmap.png --top-sessions 0 --sync-git git@github.com:YOUR_NAME/codex-info-sync.git --device laptop
 ```
+
+The PNG dashboard colors the daily grid by user message count, GitHub-contribution style. Token totals and input/output/reasoning details are shown in the surrounding metric panels.
 
 When `--sync-git` is present, the same PNG-style dashboard is also committed to the private sync repo README automatically. For a yearly dashboard in GitHub, run the yearly command above; for today's dashboard, run the `--today` command.
 
