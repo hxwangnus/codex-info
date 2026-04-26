@@ -20,8 +20,10 @@ async function main() {
   if (options.onlineMetadata) {
     await enrichWithOnlineMetadata(result, options);
   }
-  if (options.syncGit && options.syncReadme) {
+  let syncReport = null;
+  if (options.syncGit && (options.syncReadme || options.html)) {
     const readmeSync = await updateSyncReadme(result, options);
+    syncReport = readmeSync;
     result.summary.sync = {
       ...result.summary.sync,
       readme: readmeSync
@@ -37,7 +39,7 @@ async function main() {
   }
 
   if (options.html) {
-    const output = await writeHtmlReport(result, options.html, options);
+    const output = syncReport?.htmlPath || await writeHtmlReport(result, options.html, options);
     process.stdout.write(`\nHTML report written to ${output}\n`);
   }
 
@@ -187,7 +189,7 @@ Options:
   --brief, --compact         Print a short wrapped-style report
   --heatmap, --calendar      Print a GitHub-style daily usage grid
   --json                     Print machine-readable JSON
-  --html <file>              Write a self-contained local HTML report
+  --html <file>              Write a self-contained HTML report (with --sync-git, to the private sync repo)
   --png <file>               Write a PNG heatmap
   --cost, --online-metadata  Fetch public model/pricing metadata and estimate cost
   --pricing-tier <tier>      standard, batch, flex, or priority (default: standard)

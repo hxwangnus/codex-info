@@ -103,12 +103,23 @@ test("syncs through a private Git-style remote without double counting reruns", 
   assert.deepEqual(mergedB.summary.sync.devicesLastSynced.map((item) => item.device), ["macbook", "xps13"]);
   assert.ok(mergedB.summary.sync.devicesLastSynced.every((item) => item.updatedAt));
 
-  const readmeSync = await updateSyncReadme(mergedB, { syncGit: remote, syncCache: path.join(cacheB, "repo"), syncDevice: "macbook", year: "2026" });
+  const readmeSync = await updateSyncReadme(mergedB, {
+    syncGit: remote,
+    syncCache: path.join(cacheB, "repo"),
+    syncDevice: "macbook",
+    year: "2026",
+    html: "report/codex-usage.html"
+  });
   assert.equal(readmeSync.pushed, true);
+  assert.equal(readmeSync.html, "report/codex-usage.html");
   const readme = await fs.promises.readFile(path.join(cacheB, "repo", "README.md"), "utf8");
   assert.match(readme, /Codex Usage Report/);
   assert.match(readme, /assets\/codex-usage-heatmap\.png/);
+  assert.match(readme, /report\/codex-usage\.html/);
   assert.match(readme, /xps13/);
+  const html = await fs.promises.readFile(path.join(cacheB, "repo", "report", "codex-usage.html"), "utf8");
+  assert.match(html, /Message Heatmap/);
+  assert.match(html, /title="2026-04-26: 0 messages"/);
   const png = await fs.promises.readFile(path.join(cacheB, "repo", "assets", "codex-usage-heatmap.png"));
   assert.deepEqual([...png.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
 

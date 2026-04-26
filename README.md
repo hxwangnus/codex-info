@@ -55,7 +55,7 @@ npm start -- --cost --group-by model
 npm start -- 2026 --brief --cost
 npm start -- 2026 --brief --sync-git git@github.com:YOUR_NAME/codex-info-sync.git --device my-laptop
 npm start -- --json
-npm start -- --html report/codex-usage.html
+npm start -- 2026 --html report/codex-usage.html --sync-git git@github.com:YOUR_NAME/codex-info-sync.git --device my-laptop
 npm run dashboard -- 2026 --sync-git git@github.com:YOUR_NAME/codex-info-sync.git --device laptop
 ```
 
@@ -158,16 +158,16 @@ npx . 2026 --png report/codex-heatmap.png --top-sessions 0 --sync-git git@github
 
 The PNG dashboard colors the daily grid by user message count, GitHub-contribution style. Token totals and input/output/reasoning details are shown in the surrounding metric panels.
 
-For an interactive local dashboard, write an HTML report. The HTML heatmap uses the same daily message counts and shows the exact count in a browser tooltip when you hover each day:
+For an interactive private dashboard, add `--html` to the sync command. The HTML heatmap uses the same daily message counts and shows the exact count in a browser tooltip when you hover each day. With `--sync-git`, relative `--html` paths are written into the private sync repo and committed there, not into this public source repo:
 
 ```bash
-npx . 2026 --html report/codex-usage.html --cost --pricing-tier priority
+npx . 2026 --html report/codex-usage.html --cost --pricing-tier priority --sync-git git@github.com:YOUR_NAME/codex-info-sync.git --device laptop
 ```
 
-On WSL, open the generated HTML report in your Windows browser with:
+The command prints the absolute HTML path after writing the report. On WSL, open that generated file in your Windows browser with:
 
 ```bash
-explorer.exe "$(wslpath -w report/codex-usage.html)"
+explorer.exe "$(wslpath -w <printed-html-path>)"
 ```
 
 When `--sync-git` is present, the same PNG-style dashboard is also committed to the private sync repo README automatically. For a yearly dashboard in GitHub, run the yearly command above; for today's dashboard, run the `--today` command.

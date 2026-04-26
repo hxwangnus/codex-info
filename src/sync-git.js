@@ -6,6 +6,7 @@ import { execFileSync } from "node:child_process";
 import { addUsage, emptyUsage } from "./usage.js";
 import { dayKeyInRange, isoWeekKey, localDateKey, timestampInRange } from "./date-utils.js";
 import { renderHeatmapPng } from "./heatmap-png.js";
+import { renderHtmlReport } from "./format.js";
 
 const SYNC_SCHEMA_VERSION = 1;
 const DATA_DIR = "codex-info/devices";
@@ -70,17 +71,38 @@ export async function updateSyncReadme(result, options = {}) {
   ensureGitRepo(repoUrl, worktree, branch);
 
   const pngRelativePath = "assets/codex-usage-heatmap.png";
+  const htmlRelativePath = syncOutputPath(options.html);
   const readmePath = path.join(worktree, "README.md");
   const pngPath = path.join(worktree, pngRelativePath);
+  const htmlPath = htmlRelativePath ? path.join(worktree, htmlRelativePath) : "";
+  const writeReadme = options.syncReadme !== false;
+  const writePng = writeReadme;
+  const changedPaths = [];
 
-  await fs.promises.mkdir(path.dirname(pngPath), { recursive: true });
-  await fs.promises.writeFile(pngPath, renderHeatmapPng(result, options));
-  await fs.promises.writeFile(readmePath, renderSyncReadme(result, options, pngRelativePath), "utf8");
+  if (writePng) {
+    await fs.promises.mkdir(path.dirname(pngPath), { recursive: true });
+    await fs.promises.writeFile(pngPath, renderHeatmapPng(result, options));
+    changedPaths.push(pngPath);
+  }
+
+  if (writeReadme) {
+    await fs.promises.writeFile(readmePath, renderSyncReadme(result, options, pngRelativePath, htmlRelativePath), "utf8");
+    changedPaths.push(readmePath);
+  }
+
+  if (htmlRelativePath) {
+    await fs.promises.mkdir(path.dirname(htmlPath), { recursive: true });
+    await fs.promises.writeFile(htmlPath, renderHtmlReport(result, {
+      ...options,
+      heatmapImage: writePng ? relativeUrl(path.posix.dirname(htmlRelativePath), pngRelativePath) : ""
+    }), "utf8");
+    changedPaths.push(htmlPath);
+  }
 
   const changed = hasGitChanges(worktree);
   let pushed = false;
   if (changed) {
-    git(worktree, ["add", readmePath, pngPath]);
+    git(worktree, ["add", ...changedPaths]);
     git(worktree, ["commit", "-m", `Update Codex usage report for ${device}`], { commitEnv: true });
     pushed = pushWithRetry(worktree, branch);
   }
@@ -88,9 +110,29 @@ export async function updateSyncReadme(result, options = {}) {
   return {
     pushed,
     worktree,
-    readme: "README.md",
-    png: pngRelativePath
+    readme: writeReadme ? "README.md" : null,
+    png: writePng ? pngRelativePath : null,
+    html: htmlRelativePath || null,
+    htmlPath: htmlPath || null
   };
+}
+
+function syncOutputPath(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (path.isAbsolute(text) || /^[A-Za-z]:[\\/]/.test(text)) {
+    throw new Error("--html must be a relative path when used with --sync-git so the report stays inside the private sync repo.");
+  }
+  const normalized = path.posix.normalize(text.replace(/\\/g, "/"));
+  if (!normalized || normalized === "." || normalized === ".." || normalized.startsWith("../")) {
+    throw new Error(`Invalid sync output path: ${value}`);
+  }
+  return normalized;
+}
+
+function relativeUrl(fromDir, target) {
+  const relative = path.posix.relative(fromDir || ".", target);
+  return relative || path.posix.basename(target);
 }
 
 function ensureGitRepo(repoUrl, worktree, branch) {
@@ -114,7 +156,7 @@ function ensureGitRepo(repoUrl, worktree, branch) {
   }
 }
 
-function renderSyncReadme(result, options, pngRelativePath) {
+function renderSyncReadme(result, options, pngRelativePath, htmlRelativePath = "") {
   const summary = result.summary || {};
   const usage = summary.usage || emptyUsage();
   const titleRange = reportRangeLabel(result, options);
@@ -126,7 +168,14 @@ function renderSyncReadme(result, options, pngRelativePath) {
     `Range: ${titleRange}`,
     "",
     `![Codex usage heatmap](${pngRelativePath})`,
-    "",
+    ""
+  ];
+
+  if (htmlRelativePath) {
+    lines.push(`[Open interactive HTML report](${htmlRelativePath})`, "");
+  }
+
+  lines.push(
     "## Summary",
     "",
     "| Metric | Value |",
@@ -141,7 +190,7 @@ function renderSyncReadme(result, options, pngRelativePath) {
     `| Cached input tokens | ${formatNumber(usage.cachedInputTokens)} |`,
     `| Output tokens | ${formatNumber(usage.outputTokens)} |`,
     `| Reasoning tokens | ${formatNumber(usage.reasoningOutputTokens)} |`
-  ];
+  );
 
   if (typeof summary.estimatedCostUSD === "number") {
     lines.push(`| Estimated cost | ${formatUsd(summary.estimatedCostUSD)} |`);
