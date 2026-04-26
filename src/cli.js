@@ -3,6 +3,7 @@ import { collectUsage, defaultCodexHome } from "./usage.js";
 import { renderBriefReport, renderJson, renderTextReport, writeHtmlReport } from "./format.js";
 import { enrichWithOnlineMetadata } from "./metadata.js";
 import { syncGitUsage } from "./sync-git.js";
+import { addDays, localDateKey, startOfLocalIsoWeek, startOfLocalToday } from "./date-utils.js";
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
@@ -41,6 +42,7 @@ function parseArgs(argv) {
     topSessions: 5,
     topModels: 2,
     brief: false,
+    heatmap: false,
     includeProjectPaths: false,
     includeFiles: false,
     includeArchived: false,
@@ -66,8 +68,18 @@ function parseArgs(argv) {
       options.since = requiredValue(argv, ++index, arg);
     } else if (arg === "--until") {
       options.until = requiredValue(argv, ++index, arg);
+    } else if (arg === "--today") {
+      const start = startOfLocalToday();
+      options.sinceTime = start.toISOString();
+      options.untilTime = addDays(start, 1).toISOString();
+      options.periodLabel = `Today (${localDateKey(start)})`;
+    } else if (arg === "--this-week") {
+      const start = startOfLocalIsoWeek();
+      options.sinceTime = start.toISOString();
+      options.untilTime = addDays(start, 7).toISOString();
+      options.periodLabel = `This Week (${localDateKey(start)} to ${localDateKey(addDays(start, 6))})`;
     } else if (arg === "--group-by") {
-      options.groupBy = oneOf(requiredValue(argv, ++index, arg), ["day", "model", "project"], arg);
+      options.groupBy = oneOf(requiredValue(argv, ++index, arg), ["day", "week", "model", "project"], arg);
     } else if (arg === "--limit") {
       options.limit = positiveInt(requiredValue(argv, ++index, arg), arg);
     } else if (arg === "--top-sessions") {
@@ -80,6 +92,8 @@ function parseArgs(argv) {
       options.json = true;
     } else if (arg === "--brief" || arg === "--compact") {
       options.brief = true;
+    } else if (arg === "--heatmap" || arg === "--calendar") {
+      options.heatmap = true;
     } else if (arg === "--online-metadata" || arg === "--cost") {
       options.onlineMetadata = true;
     } else if (arg === "--pricing-tier") {
@@ -142,13 +156,16 @@ Usage:
 Options:
   --codex-home <path>        Codex state directory; repeat to merge machines
   --year <yyyy>              Only scan sessions/<year>
-  --since <yyyy-mm-dd>       Include sessions starting on/after this UTC date
-  --until <yyyy-mm-dd>       Include sessions starting on/before this UTC date
-  --group-by <kind>          day, model, or project (default: day)
+  --since <yyyy-mm-dd>       Include usage on/after this local date
+  --until <yyyy-mm-dd>       Include usage on/before this local date
+  --today                    Show the current local day
+  --this-week                Show the current local ISO week (Mon-Sun)
+  --group-by <kind>          day, week, model, or project (default: day)
   --limit <n>                Rows to show in grouped table (default: 12)
   --top-sessions <n>         Sessions to show in terminal/HTML report (default: 5)
   --top-models <n>           Models to show in --brief output (default: 2)
   --brief, --compact         Print a short wrapped-style report
+  --heatmap, --calendar      Print a GitHub-style daily usage grid
   --json                     Print machine-readable JSON
   --html <file>              Write a self-contained local HTML report
   --cost, --online-metadata  Fetch public model/pricing metadata and estimate cost

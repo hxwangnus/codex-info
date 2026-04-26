@@ -33,7 +33,11 @@ Useful variants:
 ```bash
 npm start -- --year 2026
 npm start -- --year 2026 --brief
+npm start -- --today --brief --cost
+npm start -- --this-week --brief --cost
 npm start -- 2026 --brief --codex-home ~/.codex --codex-home ./imports/macbook --codex-home ./imports/work-wsl
+npm start -- 2026 --group-by week --limit 60 --top-sessions 0
+npm start -- 2026 --heatmap --top-sessions 0
 npm start -- --group-by model --limit 10
 npm start -- --group-by project --include-project-paths
 npm start -- --cost --group-by model
@@ -63,6 +67,38 @@ npx . 2026 --brief --sync-git git@github.com:YOU/codex-info-sync.git --device bl
 Each run pulls the private repo, writes only that machine's device file, pushes it back, then reports the merged total across all devices. Running the same machine again updates existing session hashes instead of counting them twice.
 
 Add `--cost` to estimate cost from the merged usage. By default this uses OpenAI's `standard` token prices; pass `--pricing-tier batch`, `--pricing-tier flex`, or `--pricing-tier priority` if that better matches how you used the API.
+
+## Day, Week, and Calendar Views
+
+Current local day:
+
+```bash
+npx . --today --brief --cost
+```
+
+Current local ISO week, Monday through Sunday:
+
+```bash
+npx . --this-week --brief --cost
+```
+
+Every day in a year:
+
+```bash
+npx . 2026 --group-by day --limit 366 --top-sessions 0
+```
+
+Every week in a year:
+
+```bash
+npx . 2026 --group-by week --limit 60 --top-sessions 0
+```
+
+GitHub-style yearly token heatmap:
+
+```bash
+npx . 2026 --heatmap --top-sessions 0
+```
 
 The older manual import workflow also works:
 

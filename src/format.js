@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { addDays, localDateKey, startOfLocalIsoWeek } from "./date-utils.js";
 
 const RESET = "\x1b[0m";
 const BOLD = "\x1b[1m";
@@ -49,10 +50,18 @@ export function renderTextReport(result, options = {}) {
   if (result.metadata?.errors?.length) {
     lines.push(`${dim("Metadata", color)} ${result.metadata.errors.join("; ")}`);
   }
+  if (options.periodLabel) {
+    lines.push(`${dim("Period", color)} ${options.periodLabel}`);
+  }
 
   lines.push("");
   lines.push(`${green(groupTitle(options.groupBy), color)}`);
   lines.push(renderGroupTable(result, options));
+
+  if (options.heatmap) {
+    lines.push("");
+    lines.push(renderHeatmap(result, options));
+  }
 
   if (options.topSessions > 0) {
     lines.push("");
@@ -97,6 +106,11 @@ export function renderBriefReport(result, options = {}) {
       const cost = typeof row.estimatedCostUSD === "number" ? `  ${formatUsd(row.estimatedCostUSD)}` : "";
       lines.push(`  ${row.model.padEnd(modelWidth)}  ${formatInt(row.usage.totalTokens)} tokens${cost}`);
     }
+  }
+
+  if (options.heatmap) {
+    lines.push("");
+    lines.push(renderHeatmap(result, options));
   }
 
   return lines.join("\n");
@@ -337,7 +351,7 @@ function htmlTopSessions(result, options) {
 function renderGroupTable(result, options) {
   const groupBy = options.groupBy || "day";
   const rows = groupRows(result, groupBy, options.limit || 12);
-  const label = groupBy === "day" ? "Date" : groupBy === "model" ? "Model" : "Project";
+  const label = groupBy === "day" ? "Date" : groupBy === "week" ? "Week" : groupBy === "model" ? "Model" : "Project";
   const showCost = rows.some((row) => typeof row.estimatedCostUSD === "number");
   return table([
     [label, "Total", "Input", "Cached", "Output", "Sessions", ...(showCost ? ["Est. cost"] : [])],
@@ -389,7 +403,7 @@ function table(rows, options = {}) {
 }
 
 function groupRows(result, groupBy, limit) {
-  const key = groupBy === "model" ? "model" : groupBy === "project" ? "project" : "date";
+  const key = groupBy === "model" ? "model" : groupBy === "project" ? "project" : groupBy === "week" ? "week" : "date";
   const rows = result.groups[groupBy] || result.groups.day;
   return rows
     .map((row) => ({
@@ -400,6 +414,7 @@ function groupRows(result, groupBy, limit) {
 }
 
 function groupTitle(groupBy = "day") {
+  if (groupBy === "week") return "Usage by Week";
   if (groupBy === "model") return "Usage by Model";
   if (groupBy === "project") return "Usage by Project";
   return "Usage by Day";
@@ -455,6 +470,7 @@ function valueLine(label, value) {
 }
 
 function reportYear(result, options) {
+  if (options.periodLabel) return options.periodLabel;
   if (options.year) return options.year;
   const startYear = result.summary.dateRange?.start?.slice(0, 4);
   const endYear = result.summary.dateRange?.end?.slice(0, 4);
@@ -477,6 +493,61 @@ function pricingSourceLabel(result) {
     ? `, ${result.summary.pricedModels}/${result.summary.models} models priced`
     : "";
   return `${source}, ${tier}${priced}`;
+}
+
+function renderHeatmap(result, options = {}) {
+  const year = Number(options.year || result.summary.dateRange?.start?.slice(0, 4) || new Date().getFullYear());
+  const start = new Date(year, 0, 1);
+  const end = new Date(year, 11, 31);
+  const gridStart = startOfLocalIsoWeek(start);
+  const gridEnd = addDays(startOfLocalIsoWeek(addDays(end, 6)), 6);
+  const dayTotals = new Map((result.groups.day || []).map((row) => [row.date, row.usage.totalTokens || 0]));
+  const max = Math.max(0, ...dayTotals.values());
+  const weeks = Math.ceil((gridEnd - gridStart) / 86400000 / 7) + 1;
+  const lines = [];
+
+  lines.push(`Usage Heatmap ${year} (tokens/day)`);
+  lines.push(monthHeader(gridStart, weeks));
+
+  const dayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  for (let row = 0; row < 7; row += 1) {
+    let line = `${dayLabels[row]}  `;
+    for (let col = 0; col < weeks; col += 1) {
+      const date = addDays(gridStart, col * 7 + row);
+      const inYear = date >= start && date <= end;
+      const value = inYear ? dayTotals.get(localDateKey(date)) || 0 : 0;
+      line += `${inYear ? heatChar(value, max) : " "} `;
+    }
+    lines.push(line.trimEnd());
+  }
+
+  lines.push(`Legend: . 0  ░ low  ▒ medium  ▓ high  █ peak`);
+  return lines.join("\n");
+}
+
+function monthHeader(gridStart, weeks) {
+  const width = weeks * 2;
+  const chars = Array(width).fill(" ");
+  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const year = addDays(gridStart, 10).getFullYear();
+  for (let month = 0; month < 12; month += 1) {
+    const first = new Date(year, month, 1);
+    const col = Math.max(0, Math.floor((startOfLocalIsoWeek(first) - gridStart) / 86400000 / 7) * 2);
+    const label = monthNames[month];
+    for (let index = 0; index < label.length && col + index < width; index += 1) {
+      chars[col + index] = label[index];
+    }
+  }
+  return `     ${chars.join("")}`.trimEnd();
+}
+
+function heatChar(value, max) {
+  if (!value || max <= 0) return ".";
+  const ratio = value / max;
+  if (ratio < 0.25) return "░";
+  if (ratio < 0.5) return "▒";
+  if (ratio < 0.75) return "▓";
+  return "█";
 }
 
 function dataRootLabel(summary) {

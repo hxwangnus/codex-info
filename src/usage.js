@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import readline from "node:readline";
+import { dayKeyInRange, hasDateFilter, isoWeekKey, localDateKey, timestampInRange } from "./date-utils.js";
 
 const TOKEN_KEYS = [
   "input_tokens",
@@ -84,34 +85,46 @@ export async function collectUsage(options = {}) {
   const summary = createSummary(codexHomes, sessionRoots);
   const sessions = [];
   const dayMap = new Map();
+  const weekMap = new Map();
   const modelMap = new Map();
   const projectMap = new Map();
   const seenSessions = new Set();
 
   for (const file of files) {
     const session = await parseSessionFile(file, options);
-    if (!session || !isSessionInRange(session, options)) continue;
+    if (!session) continue;
+    const view = sessionView(session, options);
+    if (!view || !isSessionInRange(view, options)) continue;
     if (seenSessions.has(session.id)) {
       summary.duplicateSessions += 1;
       continue;
     }
     seenSessions.add(session.id);
 
-    sessions.push(session);
-    addUsage(summary.usage, session.usage);
-    summary.tokenEvents += session.tokenEvents;
-    summary.userMessages += session.userMessages;
-    summary.parseErrors += session.parseErrors;
-    summary.skippedTokenEvents += session.skippedTokenEvents;
+    sessions.push(view);
+    addUsage(summary.usage, view.usage);
+    summary.tokenEvents += view.tokenEvents;
+    summary.userMessages += view.userMessages;
+    summary.parseErrors += view.parseErrors;
+    summary.skippedTokenEvents += view.skippedTokenEvents;
 
-    if (session.startedAt) summary.activeDays.add(toDateKey(session.startedAt));
-    for (const day of session.activeDays) summary.activeDays.add(day);
-    if (session.project) summary.projects.add(session.project);
-    if (session.model) summary.models.add(session.model);
+    if (view.startedAt && timestampInRange(view.startedAt, options)) summary.activeDays.add(localDateKey(view.startedAt));
+    for (const day of view.activeDays) summary.activeDays.add(day);
+    if (view.project) summary.projects.add(view.project);
+    if (view.model) summary.models.add(view.model);
 
-    addGroup(dayMap, toDateKey(session.lastActivityAt || session.startedAt), session);
-    addGroup(modelMap, session.model || "unknown", session);
-    addGroup(projectMap, projectLabel(session.project, options), session);
+    const countedWeeks = new Set();
+    for (const day of view.days) {
+      addUsageGroup(dayMap, day.date, day);
+      const week = isoWeekKey(day.date);
+      addUsageGroup(weekMap, week, {
+        ...day,
+        sessions: countedWeeks.has(week) ? 0 : day.sessions
+      });
+      countedWeeks.add(week);
+    }
+    addGroup(modelMap, view.model || "unknown", view);
+    addGroup(projectMap, projectLabel(view.project, options), view);
   }
 
   summary.sessions = sessions.length;
@@ -125,6 +138,7 @@ export async function collectUsage(options = {}) {
     summary: finalizeSummary(summary),
     groups: {
       day: finalizeGroups(dayMap, "date"),
+      week: finalizeGroups(weekMap, "week"),
       model: finalizeGroups(modelMap, "model"),
       project: finalizeGroups(projectMap, "project")
     },
@@ -177,6 +191,9 @@ export async function parseSessionFile(file, options = {}) {
     skippedTokenEvents: 0,
     parseErrors: 0,
     activeDays: new Set(),
+    dailyUsage: new Map(),
+    dailyUserMessages: new Map(),
+    dailyTokenEvents: new Map(),
     usage: emptyUsage()
   };
   let previousTotal = null;
@@ -219,7 +236,11 @@ export async function parseSessionFile(file, options = {}) {
 
     if (payload.type === "user_message") {
       session.userMessages += 1;
-      if (timestamp) session.activeDays.add(toDateKey(timestamp));
+      if (timestamp) {
+        const day = localDateKey(timestamp);
+        session.activeDays.add(day);
+        incrementMap(session.dailyUserMessages, day, 1);
+      }
       continue;
     }
 
@@ -241,7 +262,12 @@ export async function parseSessionFile(file, options = {}) {
 
     session.tokenEvents += 1;
     addUsage(session.usage, usage);
-    if (timestamp) session.activeDays.add(toDateKey(timestamp));
+    if (timestamp) {
+      const day = localDateKey(timestamp);
+      session.activeDays.add(day);
+      incrementMap(session.dailyTokenEvents, day, 1);
+      addUsageToMap(session.dailyUsage, day, usage);
+    }
   }
 
   session.startedAt = session.startedAt || dateFromPath(file);
@@ -311,10 +337,26 @@ function addGroup(map, key, session) {
   map.set(key, group);
 }
 
+function addUsageGroup(map, key, day) {
+  if (!key) return;
+  const group = map.get(key) || {
+    key,
+    sessions: 0,
+    userMessages: 0,
+    tokenEvents: 0,
+    usage: emptyUsage()
+  };
+  group.sessions += day.sessions || 0;
+  group.userMessages += day.userMessages || 0;
+  group.tokenEvents += day.tokenEvents || 0;
+  addUsage(group.usage, day.usage || emptyUsage());
+  map.set(key, group);
+}
+
 function finalizeGroups(map, keyName) {
   return Array.from(map.values())
     .sort((a, b) => {
-      if (keyName === "date") return String(a.key).localeCompare(String(b.key));
+      if (keyName === "date" || keyName === "week") return String(a.key).localeCompare(String(b.key));
       return (b.usage.totalTokens || 0) - (a.usage.totalTokens || 0);
     })
     .map((group) => ({
@@ -339,6 +381,7 @@ function serializeSession(session, options) {
     userMessages: session.userMessages,
     tokenEvents: session.tokenEvents,
     usage: session.usage,
+    days: session.days,
     file: options.includeFiles ? session.file : undefined
   };
 }
@@ -361,9 +404,8 @@ function getDateRange(sessions) {
 function isSessionInRange(session, options) {
   const date = session.startedAt || session.lastActivityAt;
   if (!date) return true;
-  if (options.year && String(date.getUTCFullYear()) !== String(options.year)) return false;
-  if (options.since && date < startOfDay(options.since)) return false;
-  if (options.until && date >= dayAfter(options.until)) return false;
+  if (session.days?.length) return true;
+  if (!timestampInRange(date, options)) return false;
   return true;
 }
 
@@ -387,23 +429,6 @@ function parseTimestamp(value) {
   if (!value) return null;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function toDateKey(date) {
-  return date.toISOString().slice(0, 10);
-}
-
-function startOfDay(value) {
-  const text = String(value);
-  const date = text.length <= 10 ? new Date(`${text}T00:00:00.000Z`) : new Date(text);
-  if (Number.isNaN(date.getTime())) throw new Error(`Invalid date: ${value}`);
-  return date;
-}
-
-function dayAfter(value) {
-  const date = startOfDay(value);
-  date.setUTCDate(date.getUTCDate() + 1);
-  return date;
 }
 
 function minDate(left, right) {
@@ -457,4 +482,66 @@ function codexHomeList(options) {
   if (Array.isArray(options.codexHomes) && options.codexHomes.length) return options.codexHomes;
   if (options.codexHome) return [options.codexHome];
   return [defaultCodexHome()];
+}
+
+function sessionView(session, options) {
+  const days = sessionDays(session).filter((day) => !hasDateFilter(options) || dayKeyInRange(day.date, options));
+  if (!hasDateFilter(options)) {
+    return {
+      ...session,
+      activeDays: new Set(session.activeDays),
+      days
+    };
+  }
+
+  const usage = emptyUsage();
+  let userMessages = 0;
+  let tokenEvents = 0;
+  const activeDays = new Set();
+  for (const day of days) {
+    addUsage(usage, day.usage);
+    userMessages += day.userMessages;
+    tokenEvents += day.tokenEvents;
+    activeDays.add(day.date);
+  }
+
+  const startedAtInRange = timestampInRange(session.startedAt, options);
+  if (!days.length && !startedAtInRange) return null;
+
+  return {
+    ...session,
+    userMessages,
+    tokenEvents,
+    activeDays,
+    usage,
+    days
+  };
+}
+
+function sessionDays(session) {
+  const keys = new Set([
+    ...session.dailyUsage.keys(),
+    ...session.dailyUserMessages.keys(),
+    ...session.dailyTokenEvents.keys()
+  ]);
+  if (!keys.size && session.lastActivityAt) keys.add(localDateKey(session.lastActivityAt));
+  return Array.from(keys)
+    .sort()
+    .map((date) => ({
+      date,
+      sessions: 1,
+      userMessages: session.dailyUserMessages.get(date) || 0,
+      tokenEvents: session.dailyTokenEvents.get(date) || 0,
+      usage: session.dailyUsage.get(date) || emptyUsage()
+    }));
+}
+
+function incrementMap(map, key, amount) {
+  map.set(key, (map.get(key) || 0) + amount);
+}
+
+function addUsageToMap(map, key, usage) {
+  const current = map.get(key) || emptyUsage();
+  addUsage(current, usage);
+  map.set(key, current);
 }

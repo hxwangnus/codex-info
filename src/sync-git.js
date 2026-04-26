@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { addUsage, emptyUsage } from "./usage.js";
+import { dayKeyInRange, isoWeekKey, localDateKey, timestampInRange } from "./date-utils.js";
 
 const SYNC_SCHEMA_VERSION = 1;
 const DATA_DIR = "codex-info/devices";
@@ -103,7 +104,8 @@ function sessionToRecord(session, device, options) {
     tokenEvents: session.tokenEvents || 0,
     projectHash: project ? hashValue(`project:${project}`) : "",
     project: options.syncProjects && project ? project : undefined,
-    usage: normalizeStoredUsage(session.usage)
+    usage: normalizeStoredUsage(session.usage),
+    days: Array.isArray(session.days) ? session.days.map(normalizeDayRecord) : []
   };
 }
 
@@ -141,8 +143,12 @@ function aggregateRecords(records, options) {
     byId.set(record.id, normalizeRecord(record));
   }
 
-  const sessions = Array.from(byId.values()).sort((a, b) => (b.usage.totalTokens || 0) - (a.usage.totalTokens || 0));
+  const sessions = Array.from(byId.values())
+    .map((record) => recordView(record, options))
+    .filter(Boolean)
+    .sort((a, b) => (b.usage.totalTokens || 0) - (a.usage.totalTokens || 0));
   const dayMap = new Map();
+  const weekMap = new Map();
   const modelMap = new Map();
   const projectMap = new Map();
   const activeDays = new Set();
@@ -167,9 +173,18 @@ function aggregateRecords(records, options) {
     const lastActivityAt = parseDate(session.lastActivityAt) || startedAt;
     if (startedAt) start = minDate(start, startedAt);
     if (lastActivityAt) end = maxDate(end, lastActivityAt);
-    const day = dateKey(lastActivityAt || startedAt);
-    if (day) activeDays.add(day);
-    addGroup(dayMap, day, session);
+    const days = recordDays(session, options);
+    const countedWeeks = new Set();
+    for (const day of days) {
+      activeDays.add(day.date);
+      addUsageGroup(dayMap, day.date, day);
+      const week = isoWeekKey(day.date);
+      addUsageGroup(weekMap, week, {
+        ...day,
+        sessions: countedWeeks.has(week) ? 0 : day.sessions
+      });
+      countedWeeks.add(week);
+    }
     addGroup(modelMap, session.model || "unknown", session);
     addGroup(projectMap, projectLabel(session), session);
   }
@@ -200,6 +215,7 @@ function aggregateRecords(records, options) {
     },
     groups: {
       day: finalizeGroups(dayMap, "date"),
+      week: finalizeGroups(weekMap, "week"),
       model: finalizeGroups(modelMap, "model"),
       project: finalizeGroups(projectMap, "project")
     },
@@ -254,7 +270,8 @@ function normalizeRecord(record) {
     tokenEvents: Number(record.tokenEvents) || 0,
     projectHash: record.projectHash || "",
     project: record.project || undefined,
-    usage: normalizeStoredUsage(record.usage)
+    usage: normalizeStoredUsage(record.usage),
+    days: Array.isArray(record.days) ? record.days.map(normalizeDayRecord) : []
   };
 }
 
@@ -284,10 +301,26 @@ function addGroup(map, key, session) {
   map.set(key, group);
 }
 
+function addUsageGroup(map, key, day) {
+  if (!key) return;
+  const group = map.get(key) || {
+    key,
+    sessions: 0,
+    userMessages: 0,
+    tokenEvents: 0,
+    usage: emptyUsage()
+  };
+  group.sessions += day.sessions || 0;
+  group.userMessages += day.userMessages || 0;
+  group.tokenEvents += day.tokenEvents || 0;
+  addUsage(group.usage, day.usage || emptyUsage());
+  map.set(key, group);
+}
+
 function finalizeGroups(map, keyName) {
   return Array.from(map.values())
     .sort((a, b) => {
-      if (keyName === "date") return String(a.key).localeCompare(String(b.key));
+      if (keyName === "date" || keyName === "week") return String(a.key).localeCompare(String(b.key));
       return (b.usage.totalTokens || 0) - (a.usage.totalTokens || 0);
     })
     .map((group) => ({
@@ -302,10 +335,8 @@ function finalizeGroups(map, keyName) {
 function isRecordInRange(record, options) {
   const date = parseDate(record.startedAt || record.lastActivityAt);
   if (!date) return true;
-  if (options.year && String(date.getUTCFullYear()) !== String(options.year)) return false;
-  if (options.since && date < startOfDay(options.since)) return false;
-  if (options.until && date >= dayAfter(options.until)) return false;
-  return true;
+  if (Array.isArray(record.days) && record.days.some((day) => dayKeyInRange(day.date, options))) return true;
+  return timestampInRange(date, options);
 }
 
 function syncWorktree(repoUrl, syncCache) {
@@ -381,28 +412,10 @@ function projectLabel(session) {
   return "unknown";
 }
 
-function dateKey(date) {
-  const parsed = parseDate(date);
-  return parsed ? parsed.toISOString().slice(0, 10) : "";
-}
-
 function parseDate(value) {
   if (!value) return null;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function startOfDay(value) {
-  const text = String(value);
-  const date = text.length <= 10 ? new Date(`${text}T00:00:00.000Z`) : new Date(text);
-  if (Number.isNaN(date.getTime())) throw new Error(`Invalid date: ${value}`);
-  return date;
-}
-
-function dayAfter(value) {
-  const date = startOfDay(value);
-  date.setUTCDate(date.getUTCDate() + 1);
-  return date;
 }
 
 function minDate(left, right) {
@@ -419,4 +432,52 @@ function expandHome(value) {
   if (!value || value === "~") return os.homedir();
   if (value.startsWith("~/")) return path.join(os.homedir(), value.slice(2));
   return value;
+}
+
+function normalizeDayRecord(day) {
+  return {
+    date: String(day.date || ""),
+    sessions: Number(day.sessions) || 0,
+    userMessages: Number(day.userMessages) || 0,
+    tokenEvents: Number(day.tokenEvents) || 0,
+    usage: normalizeStoredUsage(day.usage)
+  };
+}
+
+function recordDays(record, options) {
+  if (Array.isArray(record.days) && record.days.length) {
+    return record.days
+      .map(normalizeDayRecord)
+      .filter((day) => dayKeyInRange(day.date, options));
+  }
+
+  const date = localDateKey(record.lastActivityAt || record.startedAt);
+  if (!date || !dayKeyInRange(date, options)) return [];
+  return [{
+    date,
+    sessions: 1,
+    userMessages: record.userMessages || 0,
+    tokenEvents: record.tokenEvents || 0,
+    usage: normalizeStoredUsage(record.usage)
+  }];
+}
+
+function recordView(record, options) {
+  const days = recordDays(record, options);
+  if (!days.length) return null;
+  const usage = emptyUsage();
+  let userMessages = 0;
+  let tokenEvents = 0;
+  for (const day of days) {
+    addUsage(usage, day.usage);
+    userMessages += day.userMessages;
+    tokenEvents += day.tokenEvents;
+  }
+  return {
+    ...record,
+    userMessages,
+    tokenEvents,
+    usage,
+    days
+  };
 }

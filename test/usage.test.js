@@ -58,6 +58,7 @@ test("collects only session files and avoids duplicate token_count rows", async 
   assert.equal(result.summary.usage.cachedInputTokens, 25);
   assert.equal(result.groups.model[0].model, "gpt-test");
   assert.equal(result.groups.project[0].project, "project-alpha");
+  assert.equal(result.groups.week[0].week, "2026-W17");
 });
 
 test("merges multiple Codex homes and skips duplicate session ids", async () => {
@@ -142,6 +143,18 @@ test("brief report prints estimated cost without numeric formatting loss", () =>
   }, { year: "2026", topModels: 1 });
   assert.match(text, /estimated:\s+\$0\.1234/);
   assert.match(text, /gpt-test\s+15 tokens\s+\$0\.1234/);
+});
+
+test("filters a local date range and keeps weekly groups", async () => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "codex-info-range-"));
+  await writeSession(root, "range-a", "2026-04-26T01:00:00.000Z", "/tmp/a", "gpt-a", 10);
+  await writeSession(root, "range-b", "2026-04-27T01:00:00.000Z", "/tmp/b", "gpt-b", 20);
+
+  const result = await collectUsage({ codexHomes: [root], since: "2026-04-26", until: "2026-04-26" });
+  assert.equal(result.summary.sessions, 1);
+  assert.equal(result.summary.usage.totalTokens, 10);
+  assert.equal(result.groups.day[0].date, "2026-04-26");
+  assert.equal(result.groups.week[0].week, "2026-W17");
 });
 
 async function writeSession(root, id, timestamp, cwd, model, totalTokens) {
