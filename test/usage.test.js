@@ -244,7 +244,7 @@ test("renders a PNG heatmap", async () => {
   assert.ok(stat.size > 1000);
 });
 
-test("HTML dashboard can embed a local heatmap image", () => {
+test("HTML dashboard renders a hoverable message heatmap", () => {
   const html = renderHtmlReport({
     summary: {
       sessions: 1,
@@ -257,7 +257,7 @@ test("HTML dashboard can embed a local heatmap image", () => {
       dateRange: { start: "2026-01-01T00:00:00.000Z", end: "2026-01-01T00:00:00.000Z" }
     },
     groups: {
-      day: [{ date: "2026-01-01", sessions: 1, usage: { inputTokens: 10, cachedInputTokens: 0, outputTokens: 5, totalTokens: 15 } }]
+      day: [{ date: "2026-01-01", sessions: 1, userMessages: 3, usage: { inputTokens: 10, cachedInputTokens: 0, outputTokens: 5, totalTokens: 15 } }]
     },
     sessions: []
   }, {
@@ -266,7 +266,10 @@ test("HTML dashboard can embed a local heatmap image", () => {
     heatmapImage: "codex-heatmap-2026.png"
   });
 
-  assert.match(html, /Usage Heatmap/);
+  assert.match(html, /Message Heatmap/);
+  assert.match(html, /title="2026-01-01: 3 messages"/);
+  assert.match(html, /class="heat-day"/);
+  assert.match(html, /PNG snapshot/);
   assert.match(html, /codex-heatmap-2026\.png/);
 });
 

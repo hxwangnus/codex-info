@@ -158,6 +158,18 @@ npx . 2026 --png report/codex-heatmap.png --top-sessions 0 --sync-git git@github
 
 The PNG dashboard colors the daily grid by user message count, GitHub-contribution style. Token totals and input/output/reasoning details are shown in the surrounding metric panels.
 
+For an interactive local dashboard, write an HTML report. The HTML heatmap uses the same daily message counts and shows the exact count in a browser tooltip when you hover each day:
+
+```bash
+npx . 2026 --html report/codex-usage.html --cost --pricing-tier priority
+```
+
+On WSL, open the generated HTML report in your Windows browser with:
+
+```bash
+explorer.exe "$(wslpath -w report/codex-usage.html)"
+```
+
 When `--sync-git` is present, the same PNG-style dashboard is also committed to the private sync repo README automatically. For a yearly dashboard in GitHub, run the yearly command above; for today's dashboard, run the `--today` command.
 
 Replace `YOUR_NAME/codex-info-sync` with your own private sync repo, and replace `--device laptop` with the current machine's device name. To inspect only the current machine without cloud sync, omit the `--sync-git` and `--device` flags.

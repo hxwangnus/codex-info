@@ -273,7 +273,36 @@ export function renderHtmlReport(result, options = {}) {
       background: linear-gradient(90deg, var(--accent), var(--accent-2));
       border-radius: inherit;
     }
-    .heatmap-frame {
+    .section-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      gap: 16px;
+      margin-bottom: 10px;
+    }
+    .section-head h2 {
+      margin-bottom: 4px;
+    }
+    .section-note {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .snapshot-link {
+      color: var(--accent);
+      font-weight: 600;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .snapshot-link:hover {
+      text-decoration: underline;
+    }
+    .heatmap-frame, .interactive-heatmap {
+      --heat-0: #ebedf0;
+      --heat-1: #aceebb;
+      --heat-2: #4ac26b;
+      --heat-3: #2da44e;
+      --heat-4: #116329;
       background: var(--panel);
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -286,6 +315,67 @@ export function renderHtmlReport(result, options = {}) {
       min-width: 760px;
       height: auto;
     }
+    .message-heatmap-grid {
+      --cell: 13px;
+      --gap: 4px;
+      display: grid;
+      grid-template-columns: 38px repeat(var(--weeks), var(--cell));
+      grid-template-rows: 18px repeat(7, var(--cell));
+      gap: var(--gap);
+      align-items: center;
+      min-width: max-content;
+    }
+    .month-label, .weekday-label {
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1;
+    }
+    .month-label {
+      align-self: end;
+    }
+    .weekday-label {
+      text-align: right;
+      padding-right: 4px;
+    }
+    .heat-day {
+      width: var(--cell);
+      height: var(--cell);
+      border: 1px solid var(--line);
+      border-radius: 3px;
+      background: var(--heat-0);
+    }
+    .heat-day[data-level="1"] { background: var(--heat-1); }
+    .heat-day[data-level="2"] { background: var(--heat-2); }
+    .heat-day[data-level="3"] { background: var(--heat-3); }
+    .heat-day[data-level="4"] { background: var(--heat-4); }
+    .heat-day.outside {
+      border-color: transparent;
+      background: transparent;
+    }
+    .heat-day:not(.outside):hover {
+      outline: 2px solid var(--text);
+      outline-offset: 1px;
+    }
+    .heatmap-legend {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 12px;
+      min-width: max-content;
+    }
+    .legend-cell {
+      width: 13px;
+      height: 13px;
+      border: 1px solid var(--line);
+      border-radius: 3px;
+      background: var(--heat-0);
+    }
+    .legend-cell[data-level="1"] { background: var(--heat-1); }
+    .legend-cell[data-level="2"] { background: var(--heat-2); }
+    .legend-cell[data-level="3"] { background: var(--heat-3); }
+    .legend-cell[data-level="4"] { background: var(--heat-4); }
     footer {
       color: var(--muted);
       margin-top: 22px;
@@ -295,6 +385,8 @@ export function renderHtmlReport(result, options = {}) {
       main { width: min(100vw - 20px, 1080px); margin-top: 18px; }
       header { display: block; }
       .meta { text-align: left; margin-top: 8px; }
+      .section-head { display: block; }
+      .snapshot-link { display: inline-block; margin-top: 6px; }
       th:nth-child(3), td:nth-child(3),
       th:nth-child(4), td:nth-child(4),
       th:nth-child(5), td:nth-child(5) { display: none; }
@@ -321,7 +413,7 @@ export function renderHtmlReport(result, options = {}) {
       ${metric("Models", formatInt(result.summary.models))}
     </div>
 
-    ${htmlHeatmapImage(options)}
+    ${htmlMessageHeatmap(result, options)}
 
     <section>
       <h2>${escapeHtml(groupTitle(groupBy))}</h2>
@@ -351,12 +443,108 @@ export function renderHtmlReport(result, options = {}) {
 </html>`;
 }
 
-function htmlHeatmapImage(options) {
-  if (!options.heatmapImage) return "";
+function htmlMessageHeatmap(result, options = {}) {
+  const heatmap = htmlHeatmapData(result, options);
+  const snapshot = options.heatmapImage
+    ? `<a class="snapshot-link" href="${escapeHtml(options.heatmapImage)}">PNG snapshot</a>`
+    : "";
   return `<section>
-      <h2>Usage Heatmap</h2>
-      <div class="heatmap-frame"><img src="${escapeHtml(options.heatmapImage)}" alt="Codex usage heatmap"></div>
+      <div class="section-head">
+        <div>
+          <h2>Message Heatmap</h2>
+          <p class="section-note">Hover a day to see the exact user message count.</p>
+        </div>
+        ${snapshot}
+      </div>
+      <div class="interactive-heatmap">
+        <div class="message-heatmap-grid" style="--weeks: ${heatmap.weeks}" role="img" aria-label="Daily user message heatmap for ${heatmap.year}">
+          ${heatmap.months.map((month) => `<div class="month-label" style="grid-column: ${month.column}; grid-row: 1">${escapeHtml(month.label)}</div>`).join("\n")}
+          ${heatmap.weekdays.map((day, index) => `<div class="weekday-label" style="grid-column: 1; grid-row: ${index + 2}">${escapeHtml(day)}</div>`).join("\n")}
+          ${heatmap.cells.map((cell) => heatmapCellHtml(cell)).join("\n")}
+        </div>
+        <div class="heatmap-legend" aria-hidden="true">
+          <span>Fewer</span>
+          ${[0, 1, 2, 3, 4].map((level) => `<span class="legend-cell" data-level="${level}"></span>`).join("")}
+          <span>More</span>
+        </div>
+      </div>
     </section>`;
+}
+
+function heatmapCellHtml(cell) {
+  if (!cell.inYear) {
+    return `<div class="heat-day outside" style="grid-column: ${cell.column}; grid-row: ${cell.row}" aria-hidden="true"></div>`;
+  }
+  const label = `${cell.date}: ${formatInt(cell.messages)} ${cell.messages === 1 ? "message" : "messages"}`;
+  return `<div class="heat-day" data-level="${cell.level}" style="grid-column: ${cell.column}; grid-row: ${cell.row}" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}"></div>`;
+}
+
+function htmlHeatmapData(result, options = {}) {
+  const year = Number(options.year || result.summary.dateRange?.start?.slice(0, 4) || new Date().getFullYear());
+  const start = new Date(year, 0, 1);
+  const end = new Date(year, 11, 31);
+  const gridStart = startOfLocalIsoWeek(start);
+  const gridEnd = addDays(startOfLocalIsoWeek(addDays(end, 6)), 6);
+  const weeks = Math.ceil((gridEnd - gridStart) / 86400000 / 7) + 1;
+  const days = new Map((result.groups.day || []).map((row) => [row.date, row.userMessages || 0]));
+  const values = [...days.values()];
+  const thresholds = heatmapThresholds(values);
+  const weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const months = monthLabelsForHeatmap(year, gridStart, weeks);
+  const cells = [];
+
+  for (let col = 0; col < weeks; col += 1) {
+    for (let row = 0; row < 7; row += 1) {
+      const date = addDays(gridStart, col * 7 + row);
+      const dateKey = localDateKey(date);
+      const inYear = date >= start && date <= end;
+      const messages = inYear ? days.get(dateKey) || 0 : 0;
+      cells.push({
+        date: dateKey,
+        inYear,
+        messages,
+        level: heatmapLevel(messages, thresholds),
+        column: col + 2,
+        row: row + 2
+      });
+    }
+  }
+
+  return { year, weeks, weekdays, months, cells };
+}
+
+function monthLabelsForHeatmap(year, gridStart, weeks) {
+  const names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const labels = [];
+  for (let month = 0; month < 12; month += 1) {
+    const first = new Date(year, month, 1);
+    const col = Math.max(0, Math.floor((startOfLocalIsoWeek(first) - gridStart) / 86400000 / 7));
+    if (col < weeks) labels.push({ label: names[month], column: col + 2 });
+  }
+  return labels;
+}
+
+function heatmapLevel(value, thresholds) {
+  if (!value) return 0;
+  if (value <= thresholds[0]) return 1;
+  if (value <= thresholds[1]) return 2;
+  if (value <= thresholds[2]) return 3;
+  return 4;
+}
+
+function heatmapThresholds(values) {
+  const nonzero = values.filter((value) => value > 0).sort((a, b) => a - b);
+  if (!nonzero.length) return [1, 2, 3];
+  return [
+    heatmapQuantile(nonzero, 0.25),
+    heatmapQuantile(nonzero, 0.5),
+    heatmapQuantile(nonzero, 0.75)
+  ];
+}
+
+function heatmapQuantile(sortedValues, ratio) {
+  const index = Math.min(sortedValues.length - 1, Math.max(0, Math.floor((sortedValues.length - 1) * ratio)));
+  return sortedValues[index];
 }
 
 function htmlTopSessions(result, options) {
