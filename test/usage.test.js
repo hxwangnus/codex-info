@@ -114,7 +114,7 @@ test("syncs through a private Git-style remote without double counting reruns", 
   assert.equal(readmeSync.html, "report/codex-usage.html");
   const readme = await fs.promises.readFile(path.join(cacheB, "repo", "README.md"), "utf8");
   assert.match(readme, /Codex Usage Report/);
-  assert.match(readme, /assets\/codex-usage-heatmap\.png/);
+  assert.match(readme, /assets\/codex-usage-heatmap\.png\?v=/);
   assert.match(readme, /report\/codex-usage\.html/);
   assert.match(readme, /xps13/);
   const html = await fs.promises.readFile(path.join(cacheB, "repo", "report", "codex-usage.html"), "utf8");

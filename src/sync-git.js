@@ -167,7 +167,7 @@ function renderSyncReadme(result, options, pngRelativePath, htmlRelativePath = "
     `Generated: ${generatedAt}`,
     `Range: ${titleRange}`,
     "",
-    `![Codex usage heatmap](${pngRelativePath})`,
+    `![Codex usage heatmap](${pngRelativePath}?v=${encodeURIComponent(generatedAt)})`,
     ""
   ];
 
