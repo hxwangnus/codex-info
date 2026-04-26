@@ -67,38 +67,6 @@ Each run pulls the private repo, writes only that machine's device file, pushes 
 
 Add `--cost` to estimate cost from the merged usage. By default this uses OpenAI's `standard` token prices; pass `--pricing-tier batch`, `--pricing-tier flex`, or `--pricing-tier priority` if that better matches how you used the API.
 
-## Day, Week, and Calendar Views
-
-Current local day:
-
-```bash
-npx . --today --brief --cost
-```
-
-Current local ISO week, Monday through Sunday:
-
-```bash
-npx . --this-week --brief --cost
-```
-
-Every day in a year:
-
-```bash
-npx . 2026 --group-by day --limit 366 --top-sessions 0
-```
-
-Every week in a year:
-
-```bash
-npx . 2026 --group-by week --limit 60 --top-sessions 0
-```
-
-GitHub-style yearly token heatmap:
-
-```bash
-npx . 2026 --heatmap --top-sessions 0
-```
-
 The older manual import workflow also works:
 
 On each other computer, export only Codex session files:
@@ -120,6 +88,42 @@ Then run one merged report:
 ```bash
 npx . 2026 --brief --codex-home ~/.codex --codex-home imports/macbook --codex-home imports/old-wsl
 ```
+
+## Day, Week, and Calendar Views
+
+The commands below pull the private `usage-sync` branch first, so they report merged usage across all synced devices.
+
+Current day across synced devices:
+
+```bash
+npx . --today --brief --cost --sync-git git@github.com:hxwangnus/codex-info.git --sync-branch usage-sync --device xps13
+```
+
+Current ISO week across synced devices, Monday through Sunday:
+
+```bash
+npx . --this-week --brief --cost --sync-git git@github.com:hxwangnus/codex-info.git --sync-branch usage-sync --device xps13
+```
+
+Every day in a year across synced devices:
+
+```bash
+npx . 2026 --group-by day --limit 366 --top-sessions 0 --sync-git git@github.com:hxwangnus/codex-info.git --sync-branch usage-sync --device xps13
+```
+
+Every week in a year across synced devices:
+
+```bash
+npx . 2026 --group-by week --limit 60 --top-sessions 0 --sync-git git@github.com:hxwangnus/codex-info.git --sync-branch usage-sync --device xps13
+```
+
+GitHub-style yearly token heatmap across synced devices:
+
+```bash
+npx . 2026 --heatmap --top-sessions 0 --sync-git git@github.com:hxwangnus/codex-info.git --sync-branch usage-sync --device xps13
+```
+
+Replace `--device xps13` with the current machine's device name when running from another computer. To inspect only the current machine without cloud sync, omit the `--sync-git`, `--sync-branch`, and `--device` flags.
 
 ## Development
 
