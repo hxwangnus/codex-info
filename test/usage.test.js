@@ -6,7 +6,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { collectUsage, normalizeUsage, diffUsage } from "../src/usage.js";
 import { syncGitUsage, updateSyncReadme } from "../src/sync-git.js";
-import { parseOpenAiPricingMarkdown } from "../src/metadata.js";
+import { enrichWithOnlineMetadata, parseOpenAiPricingMarkdown } from "../src/metadata.js";
 import { renderBriefReport, renderHtmlReport } from "../src/format.js";
 import { renderHeatmapPng, writeHeatmapPng } from "../src/heatmap-png.js";
 
@@ -169,6 +169,57 @@ test("parses OpenAI official pricing markdown rows", () => {
   assert.equal(pricing.get("gpt-test").inputCostPerMillionTokens, 2.5);
   assert.equal(pricing.get("gpt-test").cachedInputCostPerMillionTokens, 0.25);
   assert.equal(pricing.get("gpt-test").outputCostPerMillionTokens, 15);
+});
+
+test("online metadata annotates fast-mode model multipliers", async () => {
+  const originalFetch = globalThis.fetch;
+  const markdown = `
+<div data-content-switcher-pane data-value="standard">
+  <TextTokenPricingTables
+    tier="standard"
+    rows={[
+      ["gpt-5.4", 2, 0.2, 8],
+      ["gpt-5.5", 4, 0.4, 16],
+    ]}
+  />
+</div>
+<div data-content-switcher-pane data-value="priority">
+  <TextTokenPricingTables
+    tier="priority"
+    rows={[
+      ["gpt-5.4", 4, 0.4, 16],
+      ["gpt-5.5", 10, 1, 40],
+    ]}
+  />
+</div>`;
+  globalThis.fetch = async (url) => ({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    text: async () => markdown,
+    json: async () => ({})
+  });
+
+  try {
+    const result = {
+      summary: { usage: { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0, totalTokens: 0 } },
+      groups: {
+        model: [
+          { model: "gpt-5.4", usage: { inputTokens: 10, cachedInputTokens: 0, outputTokens: 5, reasoningOutputTokens: 0, totalTokens: 15 } },
+          { model: "gpt-5.5", usage: { inputTokens: 10, cachedInputTokens: 0, outputTokens: 5, reasoningOutputTokens: 0, totalTokens: 15 } }
+        ]
+      }
+    };
+
+    await enrichWithOnlineMetadata(result, { pricingTier: "priority" });
+
+    assert.equal(result.groups.model[0].fastModeMultiplier, 2);
+    assert.equal(result.groups.model[0].pricing.fastModeMultiplier, 2);
+    assert.equal(result.groups.model[1].fastModeMultiplier, 2.5);
+    assert.equal(result.groups.model[1].pricing.fastModeMultiplier, 2.5);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("brief report prints estimated cost without numeric formatting loss", () => {

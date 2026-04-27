@@ -21,6 +21,9 @@ const COLORS = {
 const FONT = {
   " ": ["00000", "00000", "00000", "00000", "00000", "00000", "00000"],
   "-": ["00000", "00000", "00000", "11111", "00000", "00000", "00000"],
+  "(": ["00010", "00100", "01000", "01000", "01000", "00100", "00010"],
+  ")": ["01000", "00100", "00010", "00010", "00010", "00100", "01000"],
+  "×": ["00000", "10001", "01010", "00100", "01010", "10001", "00000"],
   ":": ["00000", "00100", "00100", "00000", "00100", "00100", "00000"],
   "/": ["00001", "00010", "00010", "00100", "01000", "01000", "10000"],
   ".": ["00000", "00000", "00000", "00000", "00000", "01100", "01100"],
@@ -80,21 +83,32 @@ export function renderHeatmapPng(result, options = {}) {
   const top = 222;
   const width = 960;
   const height = 540;
-  const started = startedSummary(result, options.now ? new Date(options.now) : new Date());
+  const now = options.now ? new Date(options.now) : new Date();
+  const started = startedSummary(result, now);
+  const recent = recentTokenSummary(result, now);
   const image = createImage(width, height, COLORS.background);
 
   drawText(image, 32, 24, `CODEX USAGE ${year}`, COLORS.text, 3);
   drawText(image, 32, 56, "LOCAL AND SYNCED MESSAGE ACTIVITY", COLORS.muted, 1);
 
-  drawMetricCard(image, 32, 82, 142, "TOKENS", formatCompact(result.summary.usage.totalTokens));
-  drawMetricCard(image, 188, 82, 142, "MESSAGES", formatCompact(result.summary.userMessages));
-  drawMetricCard(image, 344, 82, 132, "SESSIONS", formatCompact(result.summary.sessions));
-  drawMetricCard(image, 490, 82, 132, "ACTIVE DAYS", formatCompact(result.summary.activeDays));
+  drawMetricCard(image, 32, 82, 142, "TOTAL TOKENS", formatCompact(result.summary.usage.totalTokens));
+  drawMetricCard(image, 188, 82, 142, "TODAY TOKENS", formatCompact(recent.todayTokens));
+  drawMetricCard(image, 344, 82, 132, "7 DAY TOKENS", formatCompact(recent.sevenDayTokens));
+  drawMetricCard(
+    image,
+    490,
+    82,
+    132,
+    "30 DAY TOKENS",
+    formatCompact(recent.thirtyDayTokens),
+    `${formatCompact(recent.thirtyDayActiveDays)} ACTIVE DAYS`
+  );
   drawMetricCard(image, 636, 82, 156, "STARTED", started.date, started.elapsed);
   drawMetricCard(image, 806, 82, 122, "COST", costLabel(result));
 
   drawPanel(image, 32, 158, 896, 222);
   drawText(image, 54, 172, "DAILY MESSAGE HEATMAP", COLORS.text, 2);
+  drawText(image, 540, 188, `ACTIVE DAYS ${formatCompact(result.summary.activeDays)}`, COLORS.muted, 1);
   drawText(image, 724, 174, "MESSAGES / DAY", COLORS.muted, 1);
   drawText(image, 724, 188, `MAX ${formatCompact(heatmap.max)}`, COLORS.muted, 1);
   drawMonthLabels(image, heatmap.gridStart, heatmap.weeks, left, 204, cell, gap);
@@ -142,6 +156,37 @@ function heatmapData(result, year) {
   const values = [...dayMessages.values()];
   const max = Math.max(0, ...values);
   return { start, end, gridStart, weeks, dayMessages, max, thresholds: colorThresholds(values) };
+}
+
+function recentTokenSummary(result, now) {
+  const today = startOfLocalToday(now);
+  const thirtyDay = tokensInRecentWindow(result, today, 30);
+  return {
+    todayTokens: tokensInRecentWindow(result, today, 1).tokens,
+    sevenDayTokens: tokensInRecentWindow(result, today, 7).tokens,
+    thirtyDayTokens: thirtyDay.tokens,
+    thirtyDayActiveDays: thirtyDay.activeDays
+  };
+}
+
+function tokensInRecentWindow(result, today, days) {
+  const start = addDays(today, 1 - days);
+  const end = addDays(today, 1);
+  let tokens = 0;
+  let activeDays = 0;
+  for (const row of result.groups.day || []) {
+    const date = parseDayKey(row.date);
+    if (!date || date < start || date >= end) continue;
+    tokens += Number(row.usage?.totalTokens) || 0;
+    activeDays += 1;
+  }
+  return { tokens, activeDays };
+}
+
+function parseDayKey(value) {
+  if (!value) return null;
+  const date = new Date(`${value}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function createImage(width, height, color) {
@@ -206,6 +251,14 @@ function drawText(image, x, y, text, color, scale = 1) {
   }
 }
 
+function drawTextRight(image, x, y, text, color, scale = 1) {
+  drawText(image, x - textWidth(text, scale), y, text, color, scale);
+}
+
+function textWidth(text, scale = 1) {
+  return String(text).length * 6 * scale;
+}
+
 function drawModelRows(image, result, x, y) {
   const rows = (result.groups.model || []).slice(0, 3);
   if (!rows.length) {
@@ -213,18 +266,42 @@ function drawModelRows(image, result, x, y) {
     return;
   }
   for (const [index, row] of rows.entries()) {
-    const label = `${shorten(row.model, 18)} ${formatCompact(row.usage.totalTokens)}`;
-    const cost = typeof row.estimatedCostUSD === "number" ? ` ${formatCost(row.estimatedCostUSD)}` : "";
-    drawText(image, x, y + index * 13, `${label}${cost}`, COLORS.muted, 1);
+    const rowY = y + index * 13;
+    drawText(image, x, rowY, shorten(row.model, 18), COLORS.muted, 1);
+    drawText(image, x + 130, rowY, fastMultiplierLabel(row), COLORS.muted, 1);
+    drawTextRight(image, x + 250, rowY, formatCompact(row.usage.totalTokens), COLORS.muted, 1);
+    if (typeof row.estimatedCostUSD === "number") {
+      drawTextRight(image, x + 352, rowY, formatCost(row.estimatedCostUSD), COLORS.muted, 1);
+    }
   }
+}
+
+function fastMultiplierLabel(row) {
+  const multiplier = Number(row.fastModeMultiplier) || knownFastModeMultiplier(row.model);
+  return multiplier ? `FAST (×${trimDecimal(multiplier)})` : "";
+}
+
+function knownFastModeMultiplier(model) {
+  const normalized = String(model || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, "-")
+    .split("/")
+    .at(-1);
+  if (normalized.startsWith("gpt-5.5")) return 2.5;
+  if (normalized.startsWith("gpt-5.4")) return 2;
+  return null;
 }
 
 function drawUsageRows(image, result, x, y) {
   const usage = result.summary.usage || {};
+  const col = 146;
   drawUsageMetric(image, x, y, "INPUT", usage.inputTokens);
-  drawUsageMetric(image, x + 214, y, "OUTPUT", usage.outputTokens);
+  drawUsageMetric(image, x + col, y, "OUTPUT", usage.outputTokens);
+  drawUsageMetric(image, x + col * 2, y, "MESSAGES", result.summary.userMessages);
   drawUsageMetric(image, x, y + 28, "CACHED", usage.cachedInputTokens);
-  drawUsageMetric(image, x + 214, y + 28, "REASONING", usage.reasoningOutputTokens);
+  drawUsageMetric(image, x + col, y + 28, "REASONING", usage.reasoningOutputTokens);
+  drawUsageMetric(image, x + col * 2, y + 28, "SESSIONS", result.summary.sessions);
 }
 
 function drawUsageMetric(image, x, y, label, value) {

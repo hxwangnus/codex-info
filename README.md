@@ -58,7 +58,7 @@ The private README references the PNG with a cache-busting query string for brow
 
 ## Heatmaps
 
-The PNG dashboard colors the daily grid by user message count, GitHub-contribution style. It also shows total tokens, messages, sessions, active days, start date, cost, top models, and input/cached/output/reasoning token detail.
+The PNG dashboard colors the daily grid by user message count, GitHub-contribution style. It also shows total/today/7-day/30-day tokens, total active days, start date, cost, top models with fast-mode multipliers, and usage detail including messages, sessions, input, cached, output, and reasoning tokens.
 
 The HTML report uses the same daily message counts and adds browser tooltips. Hover a day to see the exact count, such as `2026-04-26: 52 messages`.
 

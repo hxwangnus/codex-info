@@ -19,11 +19,16 @@ export async function enrichWithOnlineMetadata(result, options = {}) {
   ]);
 
   let pricing = new Map();
+  let standardPricing = new Map();
+  let priorityPricing = new Map();
   let models = new Map();
   let pricingSource = "";
 
   if (officialPricingResult.status === "fulfilled") {
-    const officialPricing = parseOpenAiPricingMarkdown(officialPricingResult.value, pricingTier);
+    const officialPricingMarkdown = officialPricingResult.value;
+    const officialPricing = parseOpenAiPricingMarkdown(officialPricingMarkdown, pricingTier);
+    standardPricing = pricingTier === "standard" ? officialPricing : parseOpenAiPricingMarkdown(officialPricingMarkdown, "standard");
+    priorityPricing = pricingTier === "priority" ? officialPricing : parseOpenAiPricingMarkdown(officialPricingMarkdown, "priority");
     if (officialPricing.size) {
       metadata.sources.push(OPENAI_PRICING_URL);
       pricing = officialPricing;
@@ -56,9 +61,16 @@ export async function enrichWithOnlineMetadata(result, options = {}) {
   for (const group of result.groups.model) {
     const modelInfo = findModelInfo(models, group.model);
     const price = findPrice(pricing, group.model);
+    const fastModeMultiplier = fastModeMultiplierFromPrices(
+      findPrice(priorityPricing, group.model),
+      findPrice(standardPricing, group.model)
+    );
     if (modelInfo) {
       group.displayName = modelInfo.displayName;
       group.provider = modelInfo.provider;
+    }
+    if (fastModeMultiplier) {
+      group.fastModeMultiplier = fastModeMultiplier;
     }
     if (price) {
       group.estimatedCostUSD = estimateCost(group.usage, price);
@@ -71,6 +83,7 @@ export async function enrichWithOnlineMetadata(result, options = {}) {
         inputCostPerToken: price.inputCostPerToken ?? null,
         cachedInputCostPerToken: price.cachedInputCostPerToken ?? null,
         outputCostPerToken: price.outputCostPerToken ?? null,
+        fastModeMultiplier: fastModeMultiplier ?? null,
         reasoningBilledAsOutput: true
       };
       totalCost += group.estimatedCostUSD;
@@ -96,6 +109,27 @@ function estimateCost(usage, price) {
     + cachedInputTokens * cachedInputCost
     + ((usage.outputTokens || 0) + (usage.reasoningOutputTokens || 0)) * outputCost;
   return roundMoney(cost);
+}
+
+function fastModeMultiplierFromPrices(priorityPrice, standardPrice) {
+  if (!priorityPrice || !standardPrice) return null;
+  const ratios = [
+    priceRatio(priorityPrice.inputCostPerMillionTokens, standardPrice.inputCostPerMillionTokens),
+    priceRatio(priorityPrice.cachedInputCostPerMillionTokens, standardPrice.cachedInputCostPerMillionTokens),
+    priceRatio(priorityPrice.outputCostPerMillionTokens, standardPrice.outputCostPerMillionTokens)
+  ].filter(Boolean);
+  if (!ratios.length) return null;
+  const average = ratios.reduce((sum, ratio) => sum + ratio, 0) / ratios.length;
+  if (average <= 1.01) return null;
+  if (ratios.some((ratio) => Math.abs(ratio - average) > 0.05)) return null;
+  return Math.round((average + Number.EPSILON) * 10) / 10;
+}
+
+function priceRatio(priorityValue, standardValue) {
+  const priority = Number(priorityValue);
+  const standard = Number(standardValue);
+  if (!Number.isFinite(priority) || !Number.isFinite(standard) || priority <= 0 || standard <= 0) return null;
+  return priority / standard;
 }
 
 async function fetchText(url) {
