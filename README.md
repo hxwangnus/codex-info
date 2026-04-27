@@ -4,7 +4,7 @@ Local-only Codex usage reporter. It reads Codex session JSONL files from your ma
 
 ## Dashboard Preview
 
-![Codex usage heatmap dashboard](assets/codex-usage-heatmap-demo.png)
+![Codex usage heatmap dashboard](assets/codex-usage-heatmap-demo.png?v=20260427-current-layout)
 
 ## Quick Start
 
